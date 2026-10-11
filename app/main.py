@@ -148,7 +148,7 @@ class SettingsUpdate(BaseModel):
 @app.on_event("startup")
 def startup(): init_db()
 @app.get("/", response_class=HTMLResponse)
-def home(): return (ROOT/"static"/"index.html").read_text()
+def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 @app.get("/api/health")
 def health(): return {"ok":True,"mode":"PAPER_ONLY","data":"SYNTHETIC DEMO","live_trading":False}
 @app.get("/api/market")
