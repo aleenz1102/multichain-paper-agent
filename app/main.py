@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from app.market_data import CoinGeckoFreeProvider
 from app.strategy import combined_signal
 from app.backtest import BacktestConfig, run_backtest
+from app.auto_monitor import MonitorConfig, PaperSignalMonitor
+from app.candle_data import BinancePublicCandleProvider
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT.parent / "paper_agent.db"
@@ -35,7 +37,7 @@ ASSETS = [
 DEFAULTS = {
     "virtual_cash": 100000.0, "fee_bps": 10.0, "slippage_bps": 8.0,
     "max_trade_pct": 10.0, "daily_loss_limit_pct": 3.0,
-    "max_positions": 4, "paused": False
+    "max_positions": 4, "paused": False, "auto_monitor_enabled": False
 }
 def now_iso(): return datetime.now(timezone.utc).isoformat()
 def connect():
@@ -290,6 +292,53 @@ def order(o: Order):
         c.commit()
     audit("PAPER_ORDER_FILLED",{"symbol":o.symbol,"side":side,"qty":qty,"execution_price":px,"fee":fee,"slippage_cost":slip_cost})
     return {"ok":True,"message":"Paper order simulated; no real order was sent.","trade":rows("SELECT * FROM trades ORDER BY id DESC LIMIT 1")[0],"portfolio":portfolio()}
+
+
+_candle_provider = BinancePublicCandleProvider()
+
+
+def _build_signal_monitor() -> PaperSignalMonitor:
+    cfg = MonitorConfig(
+        interval_seconds=300,
+        enabled=bool(settings().get("auto_monitor_enabled", False)),
+    )
+    return PaperSignalMonitor(
+        candle_provider=_candle_provider.get_candles,
+        audit=audit,
+        config=cfg,
+    )
+
+
+@app.get("/api/auto-monitor/status")
+def auto_monitor_status():
+    s = settings()
+    return {
+        "enabled": bool(s.get("auto_monitor_enabled", False)),
+        "interval_seconds": 300,
+        "mode": "AUDIT_ONLY",
+        "orders_submitted": False,
+        "candle_provider": "binance_public_klines",
+        "message": "No automatic scheduler or order execution is active.",
+    }
+
+
+class AutoMonitorEvaluation(BaseModel):
+    symbols: list[str] = Field(default=["SOL", "ETH", "ARB", "BNB"], min_length=1, max_length=30)
+
+
+@app.post("/api/auto-monitor/evaluate")
+def auto_monitor_evaluate(request: AutoMonitorEvaluation):
+    monitor = _build_signal_monitor()
+    result = monitor.evaluate(request.symbols)
+    audit("AUTO_MONITOR_MANUAL_EVALUATION", {
+        "enabled": bool(settings().get("auto_monitor_enabled", False)),
+        "symbols": request.symbols,
+        "evaluated": result.get("evaluated", 0),
+        "orders_submitted": False,
+    })
+    return result
+
+
 @app.get("/api/metrics")
 def metrics():
     ts=rows("SELECT * FROM trades ORDER BY id")
