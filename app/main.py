@@ -6,6 +6,11 @@ from contextlib import contextmanager
 from typing import Optional
 from threading import Lock, RLock
 from urllib.request import Request, urlopen
+try:
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
