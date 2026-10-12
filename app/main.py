@@ -4,6 +4,7 @@ from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import Optional
 from threading import RLock
+from app.market_data import CoinGeckoFreeProvider
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -40,7 +41,8 @@ DEFAULTS = {
     "virtual_cash": 100000.0, "fee_bps": 10.0, "slippage_bps": 8.0,
     "max_trade_pct": 10.0, "daily_loss_limit_pct": 3.0,
     "max_positions": 4, "paused": False, "auto_monitor_enabled": False,
-    "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0
+    "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0,
+    "market_data_mode": "synthetic"
 }
 _order_lock = RLock()
 def now_iso(): return datetime.now(timezone.utc).isoformat()
@@ -152,6 +154,7 @@ class SettingsUpdate(BaseModel):
     virtual_cash: Optional[float] = Field(default=None, ge=1000, le=100000000)
     max_drawdown_pct: Optional[float] = Field(default=None, gt=0, le=100)
     max_exposure_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    market_data_mode: Optional[str] = None
 _auto_scheduler: PaperAutoScheduler | None = None
 
 @app.on_event("startup")
@@ -176,7 +179,27 @@ def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 @app.get("/api/health")
 def health(): return {"ok":True,"mode":"PAPER_ONLY","data":"SYNTHETIC DEMO","live_trading":False}
 @app.get("/api/market")
-def get_market(): return {"data_status":"SYNTHETIC DEMO","items":market()}
+def get_market():
+    s = settings()
+    if s.get("market_data_mode", "synthetic") != "live_public":
+        return {"data_status": "SYNTHETIC DEMO", "provider": "synthetic", "items": market()}
+    requested = [a["symbol"] for a in ASSETS if a["symbol"] != "USDC"]
+    prices = live_provider.get_prices(requested)
+    # Fail closed: stale/missing prices are explicitly marked and never replaced with synthetic quotes.
+    items = []
+    base = {a["symbol"]: a for a in ASSETS}
+    for symbol in requested:
+        item = prices.get(symbol)
+        asset = base[symbol]
+        if item is None or item.price is None or item.status != "fresh":
+            items.append({**asset, "price": None, "change_pct": None, "signal": "HOLD",
+                          "signal_strength": 0, "data_status": "UNAVAILABLE" if item is None else item.status.upper()})
+        else:
+            items.append({**asset, "price": item.price, "change_pct": None, "signal": "HOLD",
+                          "signal_strength": 0, "data_status": "LIVE PUBLIC PRICE"})
+    items.append({**base["USDC"], "price": 1.0, "change_pct": 0.0, "signal": "HOLD",
+                  "signal_strength": 0, "data_status": "REFERENCE ONLY"})
+    return {"data_status": "LIVE PUBLIC DATA — ENTRIES REQUIRE FRESH CANDLES", "provider": "coingecko_public", "items": items}
 
 @app.get("/api/market/live")
 def get_live_market(symbols: str = "SOL,ETH,ARB,BNB,JUP,AERO,STRK,PENGU,TIA,HYPE,TRUMP,USDC"):
@@ -216,6 +239,12 @@ def get_settings(): return settings()
 @app.patch("/api/settings")
 def update_settings(update: SettingsUpdate):
     data=update.model_dump(exclude_none=True)
+    if "market_data_mode" in data and data["market_data_mode"] not in ("synthetic", "live_public"):
+        raise HTTPException(400, "market_data_mode must be 'synthetic' or 'live_public'.")
+    if data.get("market_data_mode") == "live_public":
+        live_prices = live_provider.get_prices([a["symbol"] for a in ASSETS if a["symbol"] != "USDC"])
+        if not live_prices or any(p.price is None or p.status != "fresh" for p in live_prices.values()):
+            raise HTTPException(503, "Public market data is incomplete or stale; provider mode was not changed.")
     for k,v in data.items():
         if k=="virtual_cash" and rows("SELECT id FROM trades LIMIT 1"):
             raise HTTPException(400,"Virtual starting cash cannot be changed after the first paper trade.")
