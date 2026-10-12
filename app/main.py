@@ -667,7 +667,7 @@ def market_detail(symbol: str, interval: str = "5m"):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
         raise HTTPException(400, "Invalid market symbol.")
-    if interval not in {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"}:
+    if interval not in {"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise HTTPException(400, "Unsupported candle interval.")
     pair = symbol + "USDT"
     url = "https://data-api.binance.vision/api/v3/ticker/24hr?" + __import__("urllib.parse", fromlist=["urlencode"]).urlencode({"symbol": pair})
