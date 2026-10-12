@@ -137,5 +137,18 @@ class OrderRiskTests(unittest.TestCase):
         self.assertIn("Sell exceeds holdings", error.exception.detail)
 
 
+    def test_minimum_virtual_cash_and_settings_after_first_trade(self):
+        updated = main.update_settings(main.SettingsUpdate(virtual_cash=1))
+        self.assertEqual(updated["virtual_cash"], 1)
+        # Small virtual balances are allowed; no real balance is involved.
+        main.set_setting("virtual_cash", 100000)
+        main.order(main.Order(symbol="SOL", side="BUY", amount=1000))
+        with self.assertRaises(HTTPException) as error:
+            main.update_settings(main.SettingsUpdate(virtual_cash=99999))
+        self.assertIn("cannot be changed", error.exception.detail.lower())
+        # Sending the unchanged starting balance with other settings is allowed.
+        updated = main.update_settings(main.SettingsUpdate(virtual_cash=100000, max_trade_pct=5))
+        self.assertEqual(updated["max_trade_pct"], 5)
+
 if __name__ == "__main__":
     unittest.main()
