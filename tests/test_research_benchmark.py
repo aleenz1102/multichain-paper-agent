@@ -45,3 +45,27 @@ def test_walk_forward_reports_cost_aware_holdout_benchmark():
     assert "test_excess_return_vs_buy_and_hold_pct_points" in report
     assert isinstance(report["test_outperformed_buy_and_hold_after_costs"], bool)
     assert "untouched test" in report["method"].lower()
+
+
+
+def test_walk_forward_rejects_invalid_cost_and_allocation_inputs():
+    import pytest
+
+    candles = make_candles()
+    with pytest.raises(ValueError, match="fee_bps"):
+        walk_forward_report(candles, fee_bps=-1)
+    with pytest.raises(ValueError, match="slippage_bps"):
+        walk_forward_report(candles, slippage_bps=-1)
+    with pytest.raises(ValueError, match="position_fraction"):
+        walk_forward_report(candles, position_fraction=0)
+    with pytest.raises(ValueError, match="initial_cash"):
+        walk_forward_report(candles, initial_cash=0)
+
+
+def test_walk_forward_rejects_non_finite_closes():
+    import pytest
+
+    candles = make_candles()
+    candles[50]["close"] = float("nan")
+    with pytest.raises(ValueError, match="finite and positive"):
+        walk_forward_report(candles)
