@@ -37,6 +37,20 @@ class OrderRiskTests(unittest.TestCase):
         self.assertEqual(s["max_exposure_pct"], 60.0)
         self.assertFalse(s["auto_monitor_enabled"])
 
+    def test_automation_requires_public_price_mode(self):
+        with self.assertRaises(HTTPException) as error:
+            main.update_settings(main.SettingsUpdate(auto_monitor_enabled=True))
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("Public market prices", error.exception.detail)
+
+    def test_portfolio_tracks_peak_equity_for_drawdown(self):
+        main.set_setting("high_water_equity", 120000)
+        with patch.object(main, "market", return_value=[]):
+            with patch.object(main, "open_positions", return_value=[]):
+                value = main.portfolio()
+        self.assertGreaterEqual(value["high_water_equity"], 120000)
+        self.assertGreaterEqual(value["drawdown_pct"], 0)
+
     def test_new_risk_limits_are_validated(self):
         self.assertEqual(main.SettingsUpdate(max_drawdown_pct=5, max_exposure_pct=50).max_exposure_pct, 50)
         with self.assertRaises(Exception):
@@ -48,7 +62,8 @@ class OrderRiskTests(unittest.TestCase):
         main.set_setting("max_drawdown_pct", 1.0)
         with patch.object(main, "portfolio", return_value={
             "virtual_topups": 0, "equity": 98000, "exposure": 0, "positions": [],
-            "virtual_cash": 98000, "position_count": 0
+            "virtual_cash": 98000, "position_count": 0,
+            "valuation_complete": True, "high_water_equity": 100000, "drawdown_pct": 2.0
         }):
             with self.assertRaises(HTTPException) as error:
                 main.order(main.Order(symbol="SOL", side="BUY", amount=100))
