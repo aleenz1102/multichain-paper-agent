@@ -328,20 +328,22 @@ def resume():
 def reset():
     """Clear simulation records only; never alter settings or backup files.
 
-    This endpoint is destructive, so keep the dashboard on localhost / a trusted
-    authenticated reverse proxy and retain independent backups of paper_agent.db.
+    Acquire locks in the same order as the paper-cycle path so reset cannot race
+    an active automated cycle. Keep this destructive endpoint on localhost or
+    behind a trusted authenticated reverse proxy.
     """
-    with _order_lock:
-        set_setting("auto_monitor_enabled", False)
-        set_setting("paused", True)
-        with connect() as c:
-            c.execute("DELETE FROM trades")
-            c.execute("DELETE FROM cash_adjustments")
-            c.commit()
-        set_setting("high_water_equity", float(settings()["virtual_cash"]))
-        set_setting("risk_lockout_reason", "")
-        set_setting("risk_lockout_date", "")
-        set_setting("paused", False)
+    with _auto_cycle_lock:
+        with _order_lock:
+            set_setting("auto_monitor_enabled", False)
+            set_setting("paused", True)
+            with connect() as c:
+                c.execute("DELETE FROM trades")
+                c.execute("DELETE FROM cash_adjustments")
+                c.commit()
+            set_setting("high_water_equity", float(settings()["virtual_cash"]))
+            set_setting("risk_lockout_reason", "")
+            set_setting("risk_lockout_date", "")
+            set_setting("paused", False)
     audit("SIMULATION_RESET", {"message": "Paper trade history cleared; settings preserved; no backup file touched"})
     return {"ok": True}
 
