@@ -4,7 +4,6 @@ from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import Optional
 from threading import RLock
-from app.market_data import CoinGeckoFreeProvider
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -84,18 +83,36 @@ def audit(event, detail):
         c.execute("INSERT INTO audit(ts,event,detail) VALUES(?,?,?)",(now_iso(),event,json.dumps(detail)))
         c.commit()
 def market():
-    # Deterministic moving synthetic prices; explicitly not real market data.
-    tick=int(time.time()//20)
-    rows=[]
-    for i,a in enumerate(ASSETS):
-        wave=math.sin((tick+i*7)*0.37)*a["volatility"] + math.sin((tick+i)*0.11)*a["volatility"]*0.35
-        px=a["price"]*(1+wave)
-        change=(px/a["price"]-1)*100
-        score=math.sin((tick+i*3)*0.31)
-        signal="BUY" if score>0.72 and a["symbol"]!="USDC" else ("SELL" if score < -0.72 and a["symbol"]!="USDC" else "HOLD")
-        rows.append({**a,"price":round(px,6),"change_pct":round(change,2),"signal":signal,
-                     "signal_strength":round(abs(score),2),"data_status":"SYNTHETIC DEMO"})
-    return rows
+    """Return one selected quote source; never silently mix live and synthetic prices."""
+    if settings().get("market_data_mode", "synthetic") == "live_public":
+        symbols = [a["symbol"] for a in ASSETS if a["symbol"] != "USDC"]
+        prices = live_provider.get_prices(symbols)
+        output = []
+        for asset in ASSETS:
+            symbol = asset["symbol"]
+            if symbol == "USDC":
+                output.append({**asset, "price": 1.0, "change_pct": 0.0, "signal": "HOLD",
+                               "signal_strength": 0.0, "data_status": "REFERENCE ONLY"})
+                continue
+            item = prices.get(symbol)
+            fresh = item is not None and item.status == "fresh" and item.price is not None
+            output.append({**asset, "price": float(item.price) if fresh else None,
+                           "change_pct": None, "signal": "HOLD", "signal_strength": 0.0,
+                           "data_status": "LIVE PUBLIC PRICE" if fresh else
+                               ("UNAVAILABLE" if item is None or item.status == "unavailable" else "STALE")})
+        return output
+    tick = int(time.time() // 20)
+    output = []
+    for i, asset in enumerate(ASSETS):
+        wave = math.sin((tick + i * 7) * 0.37) * asset["volatility"] + math.sin((tick + i) * 0.11) * asset["volatility"] * 0.35
+        px = asset["price"] * (1 + wave)
+        change = (px / asset["price"] - 1) * 100
+        score = math.sin((tick + i * 3) * 0.31)
+        signal = "BUY" if score > 0.72 and asset["symbol"] != "USDC" else ("SELL" if score < -0.72 and asset["symbol"] != "USDC" else "HOLD")
+        output.append({**asset, "price": round(px, 6), "change_pct": round(change, 2),
+                       "signal": signal, "signal_strength": round(abs(score), 2),
+                       "data_status": "SYNTHETIC DEMO"})
+    return output
 def rows(sql, args=()):
     with connect() as c: return [dict(x) for x in c.execute(sql,args).fetchall()]
 def open_positions():
@@ -180,26 +197,9 @@ def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 def health(): return {"ok":True,"mode":"PAPER_ONLY","data":"SYNTHETIC DEMO","live_trading":False}
 @app.get("/api/market")
 def get_market():
-    s = settings()
-    if s.get("market_data_mode", "synthetic") != "live_public":
-        return {"data_status": "SYNTHETIC DEMO", "provider": "synthetic", "items": market()}
-    requested = [a["symbol"] for a in ASSETS if a["symbol"] != "USDC"]
-    prices = live_provider.get_prices(requested)
-    # Fail closed: stale/missing prices are explicitly marked and never replaced with synthetic quotes.
-    items = []
-    base = {a["symbol"]: a for a in ASSETS}
-    for symbol in requested:
-        item = prices.get(symbol)
-        asset = base[symbol]
-        if item is None or item.price is None or item.status != "fresh":
-            items.append({**asset, "price": None, "change_pct": None, "signal": "HOLD",
-                          "signal_strength": 0, "data_status": "UNAVAILABLE" if item is None else item.status.upper()})
-        else:
-            items.append({**asset, "price": item.price, "change_pct": None, "signal": "HOLD",
-                          "signal_strength": 0, "data_status": "LIVE PUBLIC PRICE"})
-    items.append({**base["USDC"], "price": 1.0, "change_pct": 0.0, "signal": "HOLD",
-                  "signal_strength": 0, "data_status": "REFERENCE ONLY"})
-    return {"data_status": "LIVE PUBLIC DATA — ENTRIES REQUIRE FRESH CANDLES", "provider": "coingecko_public", "items": items}
+    mode = settings().get("market_data_mode", "synthetic")
+    return {"data_status": "SYNTHETIC DEMO" if mode == "synthetic" else "LIVE PUBLIC DATA — unavailable quotes are blocked",
+            "provider": mode, "items": market()}
 
 @app.get("/api/market/live")
 def get_live_market(symbols: str = "SOL,ETH,ARB,BNB,JUP,AERO,STRK,PENGU,TIA,HYPE,TRUMP,USDC"):
