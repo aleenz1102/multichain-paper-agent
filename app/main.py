@@ -452,6 +452,9 @@ def auto_monitor_status():
         "orders_submitted": False,
         "scheduler_running": bool(_auto_scheduler and _auto_scheduler.running),
         "interval_seconds": _auto_scheduler.interval_seconds if _auto_scheduler else 300,
+        "last_cycle_at": _auto_scheduler.last_cycle_at if _auto_scheduler else None,
+        "last_cycle_status": _auto_scheduler.last_cycle_status if _auto_scheduler else "not_started",
+        "last_cycle_error": _auto_scheduler.last_cycle_error if _auto_scheduler else None,
         "candle_provider": "binance_public_klines",
         "message": (
             "Scheduler is active; paper cycles run every five minutes while enabled and unpaused."
