@@ -21,7 +21,9 @@ def candles(n=180):
 class WalkForwardTests(unittest.TestCase):
     def test_report_has_three_chronological_windows_and_costs(self):
         report = walk_forward_report(candles(), fee_bps=10, slippage_bps=8)
-        self.assertEqual(set(report["windows"]), {"train", "validation", "test"})
+        self.assertTrue({"train", "validation", "test"}.issubset(report["windows"]))
+        self.assertIn("test_buy_and_hold_benchmark", report["windows"])
+        self.assertIn("test_outperformed_buy_and_hold_after_costs", report)
         self.assertGreater(report["windows"]["train"]["candles"], report["windows"]["test"]["candles"])
         self.assertEqual(report["cost_model"]["fee_bps_per_fill"], 10)
         self.assertIn("test_is_profitable_after_costs", report)
