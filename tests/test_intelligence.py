@@ -34,7 +34,7 @@ class IntelligenceTests(unittest.TestCase):
         rss = b"""<?xml version="1.0"?><rss><channel>
         <item><title>Ethereum upgrade approval brings adoption growth</title>
         <description>Network integration launches today.</description>
-        <link>https://example.com/news/1</link><pubDate>Mon, 12 Oct 2026 10:00:00 GMT</pubDate></item>
+        <link>https://example.com/news/1</link><pubDate>Sun, 11 Oct 2026 10:00:00 GMT</pubDate></item>
         </channel></rss>"""
         calls = []
         def opener(*args, **kwargs):
