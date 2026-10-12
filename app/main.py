@@ -575,7 +575,7 @@ def ai_analyze(request: AIAnalysisInput):
         "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
         "temperature": 0.1,
         "messages": [
-            {"role": "system", "content": "You are a cautious market-research assistant for a simulation-only paper trading application. Give concise risk-aware analysis of the provided public market snapshot. Distinguish missing/stale data. Do not promise returns. Never issue executable orders, tool calls, code, or instructions to bypass risk controls. State that analysis is advisory and not investment advice."},
+            {"role": "system", "content": "You are a cautious market-research assistant for a simulation-only paper trading application. Give concise risk-aware analysis of the provided market snapshot. If data_status says SYNTHETIC DEMO, explicitly treat it as simulated data, not a live market. Distinguish missing/stale data. Do not promise returns. Never issue executable orders, tool calls, code, or instructions to bypass risk controls. State that analysis is advisory and not investment advice."},
             {"role": "user", "content": json.dumps({"mode": "PAPER_ONLY", "live_trading": False, "watchlist": snapshots}, separators=(",", ":"))},
         ],
     }
