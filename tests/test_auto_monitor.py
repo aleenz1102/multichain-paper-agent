@@ -61,6 +61,30 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(len(audited), 2)
         self.assertTrue(all(not item[1]["orders_submitted"] for item in audited))
 
+    def test_mixed_timestamps_become_hold(self):
+        candles = [{"timestamp": f"2026-01-01T00:{i:02d}:00+00:00", "close": 100 + i} for i in range(30)]
+        candles[15].pop("timestamp")
+        monitor = PaperSignalMonitor(
+            candle_provider=lambda symbol: candles,
+            audit=lambda event, detail: None,
+            config=MonitorConfig(enabled=True),
+        )
+        result = monitor.evaluate(["ETH"])
+        self.assertEqual(result["results"][0]["signal"], "HOLD")
+        self.assertIn("timestamps", result["results"][0]["reason"].lower())
+
+    def test_duplicate_timestamps_become_hold(self):
+        candles = [{"timestamp": f"2026-01-01T00:{i:02d}:00+00:00", "close": 100 + i} for i in range(30)]
+        candles[20]["timestamp"] = candles[19]["timestamp"]
+        monitor = PaperSignalMonitor(
+            candle_provider=lambda symbol: candles,
+            audit=lambda event, detail: None,
+            config=MonitorConfig(enabled=True),
+        )
+        result = monitor.evaluate(["ETH"])
+        self.assertEqual(result["results"][0]["signal"], "HOLD")
+        self.assertIn("strictly chronological", result["results"][0]["reason"])
+
     def test_invalid_candle_values_become_hold(self):
         audited = []
         candles = [{"close": 100}] * 29 + [{"close": float("nan")}]
