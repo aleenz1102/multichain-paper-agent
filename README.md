@@ -54,7 +54,7 @@ Open http://localhost:8000
 - Buy and sell fees are charged as a percentage of notional.
 - Slippage is charged against the execution price in basis points.
 - No actual blockchain calls are made. Chains are labels in the synthetic market feed.
-- The daily loss circuit breaker uses realized P&L from simulated SELL orders for the current UTC date; it does not yet auto-trigger on unrealized losses.
+- The daily loss circuit breaker uses realized P&L from simulated SELL orders for the current UTC date. A separate portfolio drawdown circuit breaker uses a persisted equity high-water mark and includes unrealized P&L when valid marks are available.
 - Demo market prices update deterministically on each request. This is not a live market feed.
 - Profit metrics use completed paper trades and are indicative only.
 
@@ -91,6 +91,7 @@ Do not overwrite your existing `paper_agent.db` when checking out a development 
 - Keep Uvicorn at one worker while using the in-process scheduler. Multiple workers/processes can each start their own scheduler; this build is not a distributed scheduler.
 - Daily realized-loss, per-entry size, max concurrent positions, max portfolio exposure, and portfolio drawdown checks are enforced in the paper order path. A pause/kill switch blocks orders. Public quotes or portfolio valuations that are stale/missing are blocked rather than silently replaced by demo prices.
 - The default `synthetic` market mode is for UI and strategy experimentation only. `live_public` mode uses unauthenticated public pricing for the supported watchlist, but the order engine still only creates simulated fills.
+- Public CoinGecko prices are requested in INR to match the virtual portfolio currency and are cached briefly to reduce repeated polling and rate-limit pressure. Unsupported or stale holdings make valuation incomplete and block new orders.
 - An optional AI panel is advisory-only. To enable it, set `OPENAI_API_KEY` in your local PowerShell session before launching Uvicorn; optionally set `OPENAI_MODEL` and `OPENAI_BASE_URL`. The key is not accepted by the browser and is not written to SQLite. AI output is never parsed into orders.
 
 Example (current PowerShell session only; the key is not saved permanently):
