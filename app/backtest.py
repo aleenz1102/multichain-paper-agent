@@ -4,7 +4,7 @@ This deliberately simple close-to-next-close model includes fees and slippage an
 long-only or long/short direction. It is not a substitute for a full execution simulator.
 """
 from dataclasses import dataclass
-from math import sqrt
+from math import isfinite, sqrt
 from statistics import mean, pstdev
 from typing import Callable, Iterable
 
@@ -19,13 +19,28 @@ class BacktestConfig:
 
 def run_backtest(candles: Iterable[dict], signal_fn: Callable[[list], dict], config: BacktestConfig = BacktestConfig()):
     data = list(candles)
+    numeric_config = {
+        "initial_cash": config.initial_cash,
+        "fee_bps": config.fee_bps,
+        "slippage_bps": config.slippage_bps,
+        "position_fraction": config.position_fraction,
+    }
+    if any(not isfinite(float(value)) for value in numeric_config.values()):
+        raise ValueError("Backtest configuration values must be finite.")
     if config.initial_cash <= 0 or not 0 < config.position_fraction <= 1:
         raise ValueError("Invalid initial cash or position fraction.")
+    if config.fee_bps < 0 or config.slippage_bps < 0:
+        raise ValueError("Fee and slippage assumptions must be non-negative.")
+    if config.fee_bps >= 10_000 or config.slippage_bps >= 10_000:
+        raise ValueError("Fee and slippage assumptions must be below 10000 bps.")
     if len(data) < 2:
         raise ValueError("At least two candles are required.")
-    closes = [float(c["close"]) for c in data]
-    if any(p <= 0 for p in closes):
-        raise ValueError("Close prices must be positive.")
+    try:
+        closes = [float(c["close"]) for c in data]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Every candle must contain a numeric close price.") from exc
+    if any(not isfinite(p) or p <= 0 for p in closes):
+        raise ValueError("Close prices must be finite and positive.")
     cash = config.initial_cash
     qty = 0.0  # positive long, negative short
     equity_curve = []
