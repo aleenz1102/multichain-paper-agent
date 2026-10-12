@@ -3,6 +3,7 @@ import json, math, sqlite3, time
 from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import Optional
+from threading import RLock
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -38,8 +39,10 @@ ASSETS = [
 DEFAULTS = {
     "virtual_cash": 100000.0, "fee_bps": 10.0, "slippage_bps": 8.0,
     "max_trade_pct": 10.0, "daily_loss_limit_pct": 3.0,
-    "max_positions": 4, "paused": False, "auto_monitor_enabled": False
+    "max_positions": 4, "paused": False, "auto_monitor_enabled": False,
+    "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0
 }
+_order_lock = RLock()
 def now_iso(): return datetime.now(timezone.utc).isoformat()
 def connect():
     c = sqlite3.connect(DB_PATH)
@@ -147,6 +150,8 @@ class SettingsUpdate(BaseModel):
     max_positions: Optional[int] = Field(default=None, ge=1, le=30)
     auto_monitor_enabled: Optional[bool] = None
     virtual_cash: Optional[float] = Field(default=None, ge=1000, le=100000000)
+    max_drawdown_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    max_exposure_pct: Optional[float] = Field(default=None, gt=0, le=100)
 _auto_scheduler: PaperAutoScheduler | None = None
 
 @app.on_event("startup")
@@ -260,58 +265,97 @@ def get_trades(): return rows("SELECT * FROM trades ORDER BY id DESC LIMIT 100")
 def get_audit(): return rows("SELECT * FROM audit ORDER BY id DESC LIMIT 100")
 @app.post("/api/orders")
 def order(o: Order):
-    s=settings()
-    if s["paused"]: raise HTTPException(400,"Paper trading is paused. Resume it to place simulated orders.")
-    side=o.side.upper()
-    if side not in ("BUY","SELL"): raise HTTPException(400,"Side must be BUY or SELL.")
-    # Enforce a UTC-calendar-day realized-loss circuit breaker before accepting any new order.
-    today = datetime.now(timezone.utc).date().isoformat()
-    todays_sells = rows("SELECT realized_pnl FROM trades WHERE side='SELL' AND substr(ts,1,10)=?", (today,))
-    realized_today = sum(t["realized_pnl"] for t in todays_sells)
-    daily_loss_limit = s["virtual_cash"] * s["daily_loss_limit_pct"] / 100
-    if realized_today <= -daily_loss_limit:
-        set_setting("paused", True)
-        audit("DAILY_LOSS_LIMIT_TRIGGERED", {"realized_pnl_today": realized_today, "loss_limit": daily_loss_limit})
-        raise HTTPException(400, "Daily realized-loss limit reached. Paper trading has been paused.")
-    mk={x["symbol"]:x for x in market()}
-    if o.symbol not in mk: raise HTTPException(400,"Unknown asset.")
-    asset=mk[o.symbol]; p=portfolio()
-    if o.amount > p["equity"]*s["max_trade_pct"]/100:
-        raise HTTPException(400,f"Order exceeds max trade allocation ({s['max_trade_pct']}% of equity).")
-    active={x["symbol"]:x for x in p["positions"]}
-    if side=="BUY" and o.symbol not in active and len(active)>=s["max_positions"]:
-        raise HTTPException(400,"Maximum concurrent positions reached.")
-    fee_rate=s["fee_bps"]/10000; slip_rate=s["slippage_bps"]/10000
-    mid=asset["price"]
-    px=mid*(1+slip_rate if side=="BUY" else 1-slip_rate)
-    qty=o.amount/px
-    if side=="SELL" and o.sell_percent is not None:
-        current_position=next((x for x in p["positions"] if x["symbol"]==o.symbol),None)
-        if not current_position:
-            raise HTTPException(400,"No open paper position for this asset.")
-        qty=current_position["qty"]*o.sell_percent/100
-    # Reference notional is marked at mid; slippage is accounted for separately exactly once.
-    notional=qty*mid
-    fee=notional*fee_rate
-    slip_cost=abs(px-mid)*qty
-    if side=="BUY" and notional+fee > p["virtual_cash"]:
-        raise HTTPException(400,"Insufficient virtual cash after fees.")
-    if side=="SELL":
-        available=active.get(o.symbol,{}).get("qty",0)
-        if qty > available * (1 + 1e-9):
-            available_value=available*mid
-            raise HTTPException(400,f"Sell exceeds holdings. Available: {available:.8f} {o.symbol} (about ₹{available_value:,.2f} at the current demo mark). Use a smaller amount or sell 25%, 50%, or 100% of the position.")
-    realized=0.0
-    if side=="SELL" and o.symbol in active:
-        avg=active[o.symbol]["cost"]/active[o.symbol]["qty"] if active[o.symbol]["qty"] else 0
-        realized=(notional-fee-slip_cost)-avg*qty
-    with connect() as c:
-        c.execute("""INSERT INTO trades(ts,symbol,chain,side,qty,price,notional,fee,slippage_cost,realized_pnl,status)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(now_iso(),o.symbol,asset["chain"],side,qty,px,notional,fee,slip_cost,realized,"filled"))
-        c.commit()
-    audit("PAPER_ORDER_FILLED",{"symbol":o.symbol,"side":side,"qty":qty,"execution_price":px,"fee":fee,"slippage_cost":slip_cost})
-    return {"ok":True,"message":"Paper order simulated; no real order was sent.","trade":rows("SELECT * FROM trades ORDER BY id DESC LIMIT 1")[0],"portfolio":portfolio()}
+    # Serialize check-and-fill to prevent concurrent requests bypassing cash/exposure limits.
+    with _order_lock:
+        s = settings()
+        if s["paused"]:
+            raise HTTPException(400, "Paper trading is paused. Resume it to place simulated orders.")
+        side = o.side.upper()
+        if side not in ("BUY", "SELL"):
+            raise HTTPException(400, "Side must be BUY or SELL.")
+        if o.symbol != o.symbol.strip().upper():
+            raise HTTPException(400, "Symbol must be uppercase without surrounding whitespace.")
 
+        today = datetime.now(timezone.utc).date().isoformat()
+        todays_sells = rows(
+            "SELECT realized_pnl FROM trades WHERE side='SELL' AND substr(ts,1,10)=?",
+            (today,),
+        )
+        realized_today = sum(t["realized_pnl"] for t in todays_sells)
+        daily_loss_limit = s["virtual_cash"] * s["daily_loss_limit_pct"] / 100
+        if realized_today <= -daily_loss_limit:
+            set_setting("paused", True)
+            audit("DAILY_LOSS_LIMIT_TRIGGERED", {
+                "realized_pnl_today": realized_today, "loss_limit": daily_loss_limit,
+            })
+            raise HTTPException(400, "Daily realized-loss limit reached. Paper trading has been paused.")
+
+        p = portfolio()
+        initial_equity = float(s["virtual_cash"]) + float(p.get("virtual_topups", 0))
+        drawdown_pct = max(0.0, (initial_equity - float(p["equity"])) / initial_equity * 100) if initial_equity > 0 else 0.0
+        drawdown_limit = float(s.get("max_drawdown_pct", DEFAULTS["max_drawdown_pct"]))
+        if drawdown_pct >= drawdown_limit:
+            set_setting("paused", True)
+            audit("MAX_DRAWDOWN_TRIGGERED", {
+                "drawdown_pct": round(drawdown_pct, 4), "limit_pct": drawdown_limit,
+            })
+            raise HTTPException(400, "Maximum portfolio drawdown reached. Paper trading has been paused.")
+
+        mk = {x["symbol"]: x for x in market()}
+        if o.symbol not in mk:
+            raise HTTPException(400, "Unknown asset.")
+        asset = mk[o.symbol]
+        if o.amount > p["equity"] * s["max_trade_pct"] / 100:
+            raise HTTPException(400, f"Order exceeds max trade allocation ({s['max_trade_pct']}% of equity).")
+
+        active = {x["symbol"]: x for x in p["positions"]}
+        if side == "BUY" and o.symbol not in active and len(active) >= s["max_positions"]:
+            raise HTTPException(400, "Maximum concurrent positions reached.")
+        if side == "BUY":
+            exposure_limit = float(p["equity"]) * float(s.get("max_exposure_pct", DEFAULTS["max_exposure_pct"])) / 100
+            if float(p["exposure"]) + float(o.amount) > exposure_limit:
+                raise HTTPException(400, f"Order exceeds portfolio exposure limit ({s.get('max_exposure_pct', DEFAULTS['max_exposure_pct'])}% of equity).")
+
+        fee_rate = s["fee_bps"] / 10000
+        slip_rate = s["slippage_bps"] / 10000
+        mid = asset["price"]
+        px = mid * (1 + slip_rate if side == "BUY" else 1 - slip_rate)
+        qty = o.amount / px
+        if side == "SELL" and o.sell_percent is not None:
+            current_position = next((x for x in p["positions"] if x["symbol"] == o.symbol), None)
+            if not current_position:
+                raise HTTPException(400, "No open paper position for this asset.")
+            qty = current_position["qty"] * o.sell_percent / 100
+
+        notional = qty * mid
+        fee = notional * fee_rate
+        slip_cost = abs(px - mid) * qty
+        if side == "BUY" and notional + fee + slip_cost > p["virtual_cash"]:
+            raise HTTPException(400, "Insufficient virtual cash including fees and slippage.")
+        if side == "SELL":
+            available = active.get(o.symbol, {}).get("qty", 0)
+            if qty > available * (1 + 1e-9):
+                raise HTTPException(400, f"Sell exceeds holdings. Available: {available:.8f} {o.symbol}.")
+        realized = 0.0
+        if side == "SELL" and o.symbol in active:
+            avg = active[o.symbol]["cost"] / active[o.symbol]["qty"] if active[o.symbol]["qty"] else 0
+            realized = (notional - fee - slip_cost) - avg * qty
+        with connect() as c:
+            c.execute(
+                """INSERT INTO trades(ts,symbol,chain,side,qty,price,notional,fee,slippage_cost,realized_pnl,status)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (now_iso(), o.symbol, asset["chain"], side, qty, px, notional, fee, slip_cost, realized, "filled"),
+            )
+            c.commit()
+        audit("PAPER_ORDER_FILLED", {
+            "symbol": o.symbol, "side": side, "qty": qty, "execution_price": px,
+            "fee": fee, "slippage_cost": slip_cost,
+        })
+        return {
+            "ok": True, "message": "Paper order simulated; no real order was sent.",
+            "trade": rows("SELECT * FROM trades ORDER BY id DESC LIMIT 1")[0],
+            "portfolio": portfolio(),
+        }
 
 _candle_provider = BinancePublicCandleProvider()
 
