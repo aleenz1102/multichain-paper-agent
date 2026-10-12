@@ -43,7 +43,8 @@ DEFAULTS = {
     "max_trade_pct": 10.0, "daily_loss_limit_pct": 3.0,
     "max_positions": 4, "paused": False, "auto_monitor_enabled": False,
     "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0,
-    "high_water_equity": 100000.0, "market_data_mode": "synthetic"
+    "high_water_equity": 100000.0, "market_data_mode": "synthetic",
+    "risk_lockout_reason": "", "risk_lockout_date": ""
 }
 _order_lock = RLock()
 _auto_cycle_lock = Lock()
@@ -298,6 +299,8 @@ def reset():
         c.execute("DELETE FROM trades"); c.execute("DELETE FROM audit"); c.execute("DELETE FROM cash_adjustments"); c.commit()
     set_setting("paused",False)
     set_setting("high_water_equity",float(settings()["virtual_cash"]))
+    set_setting("risk_lockout_reason", "")
+    set_setting("risk_lockout_date", "")
     audit("SIMULATION_RESET",{"message":"Trade history cleared; virtual cash reset"})
     return {"ok":True}
 @app.get("/api/portfolio")
