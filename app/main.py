@@ -65,7 +65,7 @@ DEFAULTS = {
     "max_positions": 4, "paused": False, "auto_monitor_enabled": False,
     "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0,
     "high_water_equity": 100000.0, "market_data_mode": "synthetic",
-    "risk_lockout_reason": "", "risk_lockout_date": ""
+    "risk_lockout_reason": "", "risk_lockout_date": "", "last_auto_candle_by_symbol": {}
 }
 _order_lock = RLock()
 _auto_cycle_lock = Lock()
@@ -232,7 +232,7 @@ def startup():
         paused=lambda: bool(settings().get("paused", False)),
         run_cycle=lambda: auto_trade_run(AutoMonitorEvaluation()),
         audit=audit,
-        interval_seconds=300,
+        interval_seconds=60,
     )
     _auto_scheduler.start()
 
@@ -241,7 +241,7 @@ def shutdown():
     if _auto_scheduler is not None:
         _auto_scheduler.stop(timeout=10)
 @app.get("/", response_class=HTMLResponse)
-def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
+def home(): return HTMLResponse(content=(ROOT/"static"/"index.html").read_text(encoding="utf-8"), headers={"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"})
 @app.get("/api/health")
 def health():
     mode = settings().get("market_data_mode", "synthetic")
@@ -532,13 +532,16 @@ def auto_monitor_status():
         "mode": "PAPER_AUTO_TRADE" if s.get("auto_monitor_enabled", False) else "AUDIT_ONLY",
         "orders_submitted": False,
         "scheduler_running": bool(_auto_scheduler and _auto_scheduler.running),
-        "interval_seconds": _auto_scheduler.interval_seconds if _auto_scheduler else 300,
+        "interval_seconds": _auto_scheduler.interval_seconds if _auto_scheduler else 60,
+        "cycles_completed": _auto_scheduler.cycles_completed if _auto_scheduler else 0,
+        "cycles_failed": _auto_scheduler.cycles_failed if _auto_scheduler else 0,
+        "last_cycle_duration_seconds": _auto_scheduler.last_cycle_duration_seconds if _auto_scheduler else None,
         "last_cycle_at": _auto_scheduler.last_cycle_at if _auto_scheduler else None,
         "last_cycle_status": _auto_scheduler.last_cycle_status if _auto_scheduler else "not_started",
         "last_cycle_error": _auto_scheduler.last_cycle_error if _auto_scheduler else None,
         "candle_provider": "binance_public_klines",
         "message": (
-            "Scheduler is active; paper cycles run every five minutes while enabled and unpaused."
+            "Scheduler checks enable/pause state each second; paper cycles run immediately on enable/resume and then every 60 seconds while enabled and unpaused."
             if _auto_scheduler and _auto_scheduler.running and s.get("auto_monitor_enabled", False)
             else "Scheduler is idle unless automated paper trading is enabled; all execution remains simulated."
         ),
@@ -591,9 +594,30 @@ def auto_trade_run(request: AutoMonitorEvaluation):
         monitor = _build_signal_monitor()
         result = monitor.evaluate(symbols)
         executed = []
+        last_processed = dict(settings().get("last_auto_candle_by_symbol", {}) or {})
         for item in result.get("results", []):
             symbol = item.get("symbol", "")
             signal = item.get("signal", "HOLD").upper()
+            candle_timestamp = item.get("candle_timestamp")
+            if candle_timestamp:
+                previous_timestamp = str(last_processed.get(symbol, "") or "")
+                if previous_timestamp and str(candle_timestamp) <= previous_timestamp:
+                    executed.append({
+                        "symbol": symbol, "signal": signal, "status": "skipped_duplicate_candle",
+                        "reason": "This completed candle was already evaluated; duplicate paper entries are blocked.",
+                        "candle_timestamp": candle_timestamp,
+                    })
+                    continue
+                last_processed[symbol] = str(candle_timestamp)
+                # Persist deduplication in the existing settings table. No schema
+                # migration or reset of the existing paper ledger is required.
+                set_setting("last_auto_candle_by_symbol", last_processed)
+            else:
+                executed.append({
+                    "symbol": symbol, "signal": signal, "status": "blocked_missing_candle_timestamp",
+                    "reason": "No completed-candle timestamp; automated action withheld.",
+                })
+                continue
             if signal not in ("BUY", "SELL") or symbol not in {a["symbol"] for a in ASSETS}:
                 continue
             news_context = _news_veto(symbol)
