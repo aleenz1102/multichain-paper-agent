@@ -159,7 +159,9 @@ async function runBacktest(symbol){
    '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
    '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
    '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
-   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+'\\n'+d.warning;
+   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
+   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
+   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
  }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
 }
 $('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
