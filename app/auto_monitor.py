@@ -72,14 +72,25 @@ class PaperSignalMonitor:
                             "reason": "Insufficient candle history; at least 30 candles are required.",
                         }
                     else:
-                        # Validate chronological order when candles provide timestamps.
+                        # Public candle data includes timestamps. If any are present,
+                        # require every timestamp and strict chronological uniqueness.
                         times = [c.get("timestamp") for c in candles]
-                        if all(t is not None for t in times) and times != sorted(times):
-                            result = {
-                                "symbol": symbol,
-                                "signal": "HOLD",
-                                "reason": "Candle timestamps are not chronological.",
-                            }
+                        if any(t is not None for t in times):
+                            if any(not isinstance(t, str) or not t.strip() for t in times):
+                                result = {
+                                    "symbol": symbol,
+                                    "signal": "HOLD",
+                                    "reason": "Candle timestamps are missing or invalid.",
+                                }
+                            elif times != sorted(times) or len(set(times)) != len(times):
+                                result = {
+                                    "symbol": symbol,
+                                    "signal": "HOLD",
+                                    "reason": "Candle timestamps are not strictly chronological.",
+                                }
+                            else:
+                                signal = combined_signal(candles)
+                                result = {"symbol": symbol, **signal}
                         else:
                             signal = combined_signal(candles)
                             result = {"symbol": symbol, **signal}
