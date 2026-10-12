@@ -144,6 +144,7 @@ class SettingsUpdate(BaseModel):
     max_trade_pct: Optional[float] = Field(default=None, gt=0, le=100)
     daily_loss_limit_pct: Optional[float] = Field(default=None, gt=0, le=100)
     max_positions: Optional[int] = Field(default=None, ge=1, le=30)
+    auto_monitor_enabled: Optional[bool] = None
     virtual_cash: Optional[float] = Field(default=None, ge=1000, le=100000000)
 @app.on_event("startup")
 def startup(): init_db()
@@ -315,7 +316,7 @@ def auto_monitor_status():
     return {
         "enabled": bool(s.get("auto_monitor_enabled", False)),
         "interval_seconds": 300,
-        "mode": "AUDIT_ONLY",
+        "mode": "PAPER_AUTO_TRADE" if s.get("auto_monitor_enabled", False) else "AUDIT_ONLY",
         "orders_submitted": False,
         "candle_provider": "binance_public_klines",
         "message": "No automatic scheduler or order execution is active.",
@@ -337,6 +338,44 @@ def auto_monitor_evaluate(request: AutoMonitorEvaluation):
         "orders_submitted": False,
     })
     return result
+
+
+@app.post("/api/auto-trade/run")
+def auto_trade_run(request: AutoMonitorEvaluation):
+    """One bounded automated paper-trading cycle; never sends external orders."""
+    s = settings()
+    if not s.get("auto_monitor_enabled", False):
+        raise HTTPException(400, "Automated paper trading is disabled. Enable it in settings first.")
+    if s.get("paused", False):
+        raise HTTPException(400, "Paper trading is paused.")
+    symbols = list(dict.fromkeys(x.strip().upper() for x in request.symbols if x.strip()))[:30]
+    monitor = _build_signal_monitor()
+    result = monitor.evaluate(symbols)
+    executed = []
+    for item in result.get("results", []):
+        symbol = item.get("symbol", "")
+        signal = item.get("signal", "HOLD").upper()
+        if signal not in ("BUY", "SELL") or symbol not in {a["symbol"] for a in ASSETS}:
+            continue
+        p = portfolio()
+        if signal == "BUY":
+            amount = round(max(0.0, min(p["equity"] * s["max_trade_pct"] / 100, p["virtual_cash"])), 2)
+            if amount <= 0:
+                executed.append({"symbol": symbol, "signal": signal, "status": "skipped", "reason": "No virtual cash available."})
+                continue
+        else:
+            pos = next((p0 for p0 in p["positions"] if p0["symbol"] == symbol), None)
+            if not pos:
+                executed.append({"symbol": symbol, "signal": signal, "status": "skipped", "reason": "No open paper position."})
+                continue
+            amount = round(pos["market_value"], 2)
+        try:
+            fill = order(Order(symbol=symbol, side=signal, amount=max(amount, 0.01), sell_percent=100 if signal == "SELL" else None))
+            executed.append({"symbol": symbol, "signal": signal, "status": "paper_filled", "trade_id": fill["trade"]["id"]})
+        except HTTPException as exc:
+            executed.append({"symbol": symbol, "signal": signal, "status": "blocked_by_risk", "reason": str(exc.detail)})
+    audit("AUTO_PAPER_CYCLE_COMPLETED", {"symbols": symbols, "orders_submitted": False, "paper_fills": sum(x["status"] == "paper_filled" for x in executed), "results": executed})
+    return {"mode": "PAPER_ONLY", "live_trading": False, "orders_submitted": False, "evaluated": result.get("evaluated", 0), "results": result.get("results", []), "paper_actions": executed}
 
 
 @app.get("/api/metrics")
