@@ -91,6 +91,21 @@ class CandleProviderTests(unittest.TestCase):
         with self.assertRaises(CandleDataError):
             self.provider(rows).get_candles("SOL")
 
+
+    @patch("app.candle_data.time.time", return_value=NOW_MS / 1000)
+    def test_returns_current_forming_candle_for_display_only(self, _clock):
+        open_ms = NOW_MS - INTERVAL_MS // 2
+        row = [open_ms, "100", "102", "99", "101", "12.5", NOW_MS + 1000]
+
+        def opener(request, timeout):
+            self.assertIn("limit=1", request.full_url)
+            return FakeResponse([row])
+
+        candle = BinancePublicCandleProvider(opener=opener).get_forming_candle("SOL")
+        self.assertTrue(candle["forming"])
+        self.assertEqual(candle["close"], 101.0)
+        self.assertIn("timestamp", candle)
+
     def test_rejects_invalid_provider_configuration(self):
         with self.assertRaises(ValueError):
             BinancePublicCandleProvider(limit=10)

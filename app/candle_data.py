@@ -148,3 +148,53 @@ class BinancePublicCandleProvider:
             raise CandleDataError("Latest completed candle is stale.")
 
         return candles
+
+    def get_forming_candle(self, symbol):
+        """Return the current, unfinished candle for chart display only.
+
+        Strategy and risk evaluation must continue to use get_candles(), which
+        deliberately returns completed candles only.
+        """
+        symbol = symbol.upper()
+        if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
+            raise CandleDataError(f"Invalid market symbol {symbol!r}.")
+        pair = SYMBOL_PAIRS.get(symbol, symbol + "USDT")
+        params = urlencode({"symbol": pair, "interval": self.interval, "limit": 1})
+        request = Request(
+            "https://data-api.binance.vision/api/v3/klines?" + params,
+            headers={"Accept": "application/json", "User-Agent": "multichain-paper-agent/1.0"},
+        )
+        try:
+            with self.opener(request, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+            raise CandleDataError(
+                f"Public forming-candle provider unavailable: {type(exc).__name__}."
+            ) from exc
+        if not isinstance(payload, list) or not payload:
+            return None
+        row = payload[-1]
+        if not isinstance(row, list) or len(row) < 7:
+            raise CandleDataError("Malformed forming candle row.")
+        try:
+            open_ms = int(row[0])
+            open_price, high, low, close, volume = map(
+                float, (row[1], row[2], row[3], row[4], row[5])
+            )
+            close_ms = int(row[6])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise CandleDataError("Forming candle contains invalid fields.") from exc
+        values = (open_price, high, low, close, volume)
+        if not all(math.isfinite(value) for value in values):
+            raise CandleDataError("Forming candle contains non-finite values.")
+        if min(open_price, high, low, close) <= 0 or volume < 0:
+            raise CandleDataError("Forming candle prices must be positive and volume non-negative.")
+        if high < max(open_price, close, low) or low > min(open_price, close, high):
+            raise CandleDataError("Inconsistent forming candle OHLC values.")
+        if close_ms < int(time.time() * 1000):
+            return None
+        return {
+            "timestamp": datetime.fromtimestamp(open_ms / 1000, tz=timezone.utc).isoformat(),
+            "open": open_price, "high": high, "low": low, "close": close,
+            "volume": volume, "forming": True,
+        }

@@ -734,6 +734,54 @@ def ai_analyze(request: AIAnalysisInput):
 
 
 
+_market_ticker_cache: dict[str, tuple[float, dict]] = {}
+_market_ticker_cache_lock = Lock()
+
+
+@app.get("/api/market/ticker/{symbol}")
+def market_ticker(symbol: str):
+    """Lightweight, cached public USDT ticker for one-second UI refreshes."""
+    symbol = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
+        raise HTTPException(400, "Invalid market symbol.")
+    now = time.monotonic()
+    with _market_ticker_cache_lock:
+        cached = _market_ticker_cache.get(symbol)
+        if cached and now - cached[0] < 0.8:
+            return dict(cached[1])
+        pair = symbol + "USDT"
+        url = "https://data-api.binance.vision/api/v3/ticker/24hr?" + urlencode({"symbol": pair})
+        try:
+            req = Request(url, headers={"Accept": "application/json", "User-Agent": "multichain-paper-agent/1.0"})
+            with urlopen(req, timeout=5) as response:
+                ticker = json.loads(response.read().decode("utf-8"))
+            if not isinstance(ticker, dict) or ticker.get("symbol") != pair:
+                raise ValueError("Ticker response did not match requested USDT pair.")
+            price = float(ticker["lastPrice"])
+            change = float(ticker["priceChangePercent"])
+            volume = float(ticker["quoteVolume"])
+            high = float(ticker["highPrice"])
+            low = float(ticker["lowPrice"])
+            trades = int(ticker["count"])
+            if not all(math.isfinite(v) for v in (price, change, volume, high, low)) or min(price, volume, high, low) < 0 or price == 0:
+                raise ValueError("Ticker contains invalid numeric values.")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(503, "Public USDT ticker temporarily unavailable.") from exc
+        result = {
+            "symbol": symbol, "pair": pair, "provider": "Binance public spot REST",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "ticker": {
+                "price": price, "change_24h_pct": change,
+                "quote_volume_24h_usdt": volume, "trades_24h": trades,
+                "high_24h": high, "low_24h": low,
+            },
+        }
+        _market_ticker_cache[symbol] = (time.monotonic(), result)
+        return dict(result)
+
+
 @app.get("/api/market/detail/{symbol}")
 def market_detail(symbol: str, interval: str = "5m"):
     """Read-only live ticker, completed candles and explainable signal for a USDT spot pair."""
@@ -752,6 +800,12 @@ def market_detail(symbol: str, interval: str = "5m"):
             raise ValueError("Ticker response did not match requested USDT pair.")
         candle_provider = _candle_provider if interval == _candle_provider.interval else BinancePublicCandleProvider(interval=interval, limit=150)
         candles = candle_provider.get_candles(symbol)
+        try:
+            forming_candle = candle_provider.get_forming_candle(symbol)
+        except Exception:
+            # Keep validated completed history available even if the optional
+            # in-progress chart candle cannot be fetched.
+            forming_candle = None
         signal = combined_signal(candles)
         return {
             "symbol": symbol, "pair": pair, "provider": "Binance public spot market data",
@@ -763,7 +817,7 @@ def market_detail(symbol: str, interval: str = "5m"):
                 "trades_24h": int(ticker["count"]),
                 "high_24h": float(ticker["highPrice"]), "low_24h": float(ticker["lowPrice"]),
             },
-            "candles": candles, "signal": signal, "trade_plan": build_trade_plan(candles, signal),
+            "candles": candles, "forming_candle": forming_candle, "signal": signal, "trade_plan": build_trade_plan(candles, signal),
             "warning": "Signal is rule-based research, not a profitability guarantee. No order is submitted.",
         }
     except HTTPException:

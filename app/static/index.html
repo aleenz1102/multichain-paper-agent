@@ -116,18 +116,19 @@ async function pauseEngine(){try{await api('/api/pause',{method:'POST'});await r
 async function resumeEngine(){try{await api('/api/resume',{method:'POST'});await refresh()}catch(e){$('orderMessage').textContent=e.message}}
 async function resetSim(){if(!confirm('Clear all local paper trades and audit history?'))return;try{await api('/api/reset',{method:'POST'});await refresh()}catch(e){$('orderMessage').textContent=e.message}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
-let selectedMarket='BTC',selectedInterval='5m',marketDetailTimer=null,marketSocket=null,marketSocketRetry=null,liveCandles=[];
+let selectedMarket='BTC',selectedInterval='5m',marketDetailTimer=null,marketSocket=null,marketSocketRetry=null,marketTickerTimer=null,marketTickerInFlight=false,liveCandles=[];
 function setIntervalMarket(interval,button){selectedInterval=interval;document.querySelectorAll('[data-interval]').forEach(b=>b.classList.toggle('active',b===button));loadMarketDetail(selectedMarket);connectMarketStream(selectedMarket);}
 function selectMarket(symbol){selectedMarket=symbol;document.querySelectorAll('#market tbody tr').forEach(r=>r.classList.toggle('selected',r.dataset.symbol===symbol));$('symbol').value=symbol;loadMarketDetail(symbol);connectMarketStream(symbol);}
 function connectMarketStream(symbol){
  if(!symbol||!/^[A-Z0-9]{2,20}$/.test(symbol)||!window.WebSocket)return;
  if(marketSocketRetry){clearTimeout(marketSocketRetry);marketSocketRetry=null;}
+ if(marketTickerTimer){clearInterval(marketTickerTimer);marketTickerTimer=null;}
  if(marketSocket){try{marketSocket.close();}catch(e){}marketSocket=null;}
  const pair=symbol.toLowerCase()+'usdt';
  const streams=pair+'@ticker/'+pair+'@kline_'+selectedInterval;
  const socket=new WebSocket('wss://stream.binance.com:9443/stream?streams='+streams);
  marketSocket=socket;
- socket.onopen=()=>{if(marketSocket===socket)$('detailMeta').textContent='LIVE STREAM | '+symbol+'/USDT | '+selectedInterval;};
+ socket.onopen=()=>{if(marketSocket===socket){if(marketTickerTimer){clearInterval(marketTickerTimer);marketTickerTimer=null;}$('detailMeta').textContent='LIVE STREAM | '+symbol+'/USDT | '+selectedInterval;}};
  socket.onmessage=(event)=>{
   if(marketSocket!==socket)return;
   try{
@@ -147,7 +148,29 @@ function connectMarketStream(symbol){
   }catch(e){/* Ignore malformed frames; the next REST refresh validates history. */}
  };
  socket.onerror=()=>{try{socket.close();}catch(e){}};
- socket.onclose=()=>{if(marketSocket===socket){$('detailMeta').textContent='Stream disconnected | reconnecting...';marketSocketRetry=setTimeout(()=>connectMarketStream(symbol),3000);}};
+ socket.onclose=()=>{if(marketSocket===socket){marketSocket=null;startMarketTickerPolling(symbol);}};
+}
+async function refreshMarketTicker(symbol){
+ if(marketTickerInFlight||symbol!==selectedMarket)return;
+ marketTickerInFlight=true;
+ try{
+  const d=await api('/api/market/ticker/'+encodeURIComponent(symbol)),t=d.ticker||{};
+  if(symbol!==selectedMarket)return;
+  $('detailPrice').textContent='$'+num(t.price,8);
+  $('detailChange').textContent=num(t.change_24h_pct,2)+'%';
+  $('detailChange').className='value '+(Number(t.change_24h_pct)>=0?'positive':'negative');
+  $('detailVolume').textContent=num(t.quote_volume_24h_usdt,0);
+  $('detailRange').textContent='$'+num(t.low_24h,8)+' - $'+num(t.high_24h,8);
+  $('detailMeta').textContent='REST LIVE | '+symbol+'/USDT | '+new Date(d.fetched_at).toLocaleTimeString()+' | candles refresh every 10s';
+ }catch(e){if(symbol===selectedMarket)$('detailMeta').textContent='Live ticker temporarily unavailable | '+e.message;}
+ finally{marketTickerInFlight=false;}
+}
+function startMarketTickerPolling(symbol){
+ if(marketTickerTimer)clearInterval(marketTickerTimer);
+ marketTickerTimer=null;
+ $('detailMeta').textContent='WebSocket unavailable | using public REST ticker fallback';
+ refreshMarketTicker(symbol);
+ marketTickerTimer=setInterval(()=>refreshMarketTicker(symbol),1000);
 }
 function drawCandles(candles){
  const data=(candles||[]).filter(c=>Number.isFinite(Number(c.open))&&Number.isFinite(Number(c.close))&&Number.isFinite(Number(c.high))&&Number.isFinite(Number(c.low)));
@@ -163,7 +186,7 @@ async function loadMarketDetail(symbol){
  try{const d=await api('/api/market/detail/'+encodeURIComponent(symbol)+'?interval='+encodeURIComponent(selectedInterval)),t=d.ticker||{};
  $('detailPrice').textContent='$'+num(t.price,8);$('detailChange').textContent=num(t.change_24h_pct,2)+'%';$('detailChange').className='value '+(Number(t.change_24h_pct)>=0?'positive':'negative');$('detailVolume').textContent=num(t.quote_volume_24h_usdt,0);$('detailRange').textContent='$'+num(t.low_24h,8)+' – $'+num(t.high_24h,8);
  $('detailMeta').textContent=d.provider+'  |  '+(d.fetched_at?new Date(d.fetched_at).toLocaleTimeString():'updated now')+'  |  '+(d.candles||[]).length+' candles';
- const s=d.signal||{};$('detailSignal').textContent=(s.signal||'HOLD')+'  |  '+String(s.regime||'UNKNOWN').replaceAll('_',' ').toUpperCase();$('detailSignal').className='pill '+String(s.signal||'HOLD').toLowerCase();$('detailScore').textContent='Score '+num(Number(s.score||0)*100,1)+'%';$('detailReason').textContent=s.reason||'No signal rationale available.';drawCandles(d.candles||[]);$('detailWarning').textContent=d.warning||'Research signal only. No order submitted.';
+ const s=d.signal||{};$('detailSignal').textContent=(s.signal||'HOLD')+'  |  '+String(s.regime||'UNKNOWN').replaceAll('_',' ').toUpperCase();$('detailSignal').className='pill '+String(s.signal||'HOLD').toLowerCase();$('detailScore').textContent='Score '+num(Number(s.score||0)*100,1)+'%';$('detailReason').textContent=s.reason||'No signal rationale available.';liveCandles=(d.candles||[]).slice(-150);drawCandles(d.forming_candle?[...liveCandles,d.forming_candle]:(d.candles||[]));$('detailWarning').textContent=d.warning||'Research signal only. No order submitted.';
  }catch(e){$('detailMeta').textContent='Live detail unavailable: '+e.message;$('candleChart').innerHTML='<div class="small negative" style="padding:18px">Live candles unavailable; signal withheld.</div>';$('detailSignal').textContent='SIGNAL WITHHELD';$('detailReason').textContent='No stale or fabricated signal is displayed.';}
 }
 async function loadDailyCandidates(){
@@ -191,7 +214,7 @@ async function refreshIntelligence(){
  $('newsList').innerHTML=(n.items||[]).map(x=>'<div class="newsitem"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">'+esc(x.title)+'</a><div class="small">'+esc(x.source)+'  |  '+esc(x.published_at||'time unknown')+'  |  '+esc(x.sentiment?.label||'unknown')+' sentiment ('+num(x.sentiment?.confidence,2)+' confidence)</div></div>').join('')||'<div class="small">No current headlines available. News unavailable is treated as unknown, not bullish.</div>';
  if(n.provider_status==='unavailable')$('newsList').insertAdjacentHTML('afterbegin','<div class="small negative">RSS feeds unavailable; news veto is inactive until data returns.</div>');
  if(!items.some(x=>String(x.symbol||'').replace(/USDT$/,'')===selectedMarket)&&items.length)selectedMarket=String(items[0].symbol||'BTC').replace(/USDT$/,'');
- if(!marketDetailTimer){loadMarketDetail(selectedMarket);connectMarketStream(selectedMarket);marketDetailTimer=setInterval(()=>loadMarketDetail(selectedMarket),30000);}
+ if(!marketDetailTimer){loadMarketDetail(selectedMarket);connectMarketStream(selectedMarket);marketDetailTimer=setInterval(()=>loadMarketDetail(selectedMarket),10000);}
  }catch(e){$('intelStatus').textContent='Market intelligence unavailable: '+e.message;$('liveMarketMeta').textContent='Live USDT market scanner unavailable';$('market').innerHTML='<tr><td colspan="7" class="negative">Live market data unavailable: '+esc(e.message)+'</td></tr>';$('newsList').textContent='News unavailable; no positive sentiment is assumed.';}
 }
 async function runBacktest(symbol){
