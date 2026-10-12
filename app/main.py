@@ -241,7 +241,7 @@ def shutdown():
     if _auto_scheduler is not None:
         _auto_scheduler.stop(timeout=10)
 @app.get("/", response_class=HTMLResponse)
-def home(): return HTMLResponse(content=(ROOT/"static"/"index.html").read_text(encoding="utf-8"), headers={"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"})
+def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 @app.get("/api/health")
 def health():
     mode = settings().get("market_data_mode", "synthetic")

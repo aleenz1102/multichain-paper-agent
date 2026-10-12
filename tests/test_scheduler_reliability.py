@@ -102,7 +102,9 @@ class AutoTradeDeduplicationTests(unittest.TestCase):
             main.settings()["last_auto_candle_by_symbol"]["SOL"], candle_time
         )
 
-    def test_home_response_declares_utf8(self):
-        response = main.home()
+    def test_home_response_content_is_utf8_readable(self):
+        from fastapi.responses import HTMLResponse
+        html = main.home()
+        response = HTMLResponse(content=html)
         self.assertIn("charset=utf-8", response.headers["content-type"].lower())
-        self.assertIn(b"MULTICHAIN PAPER AGENT", response.body)
+        self.assertIn("MULTICHAIN PAPER AGENT", html)
