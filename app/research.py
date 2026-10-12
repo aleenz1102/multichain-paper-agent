@@ -1,17 +1,86 @@
-"""Out-of-sample evaluation helpers for the paper-trading research loop."""
+"""Cost-aware walk-forward research and conservative strategy selection."""
 from __future__ import annotations
+
+from math import isfinite
+from statistics import mean, pstdev
 
 from app.backtest import BacktestConfig, run_backtest
 from app.strategy import combined_signal
 
 
+def _closes(candles):
+    values = [float(c["close"]) for c in candles]
+    if any(not isfinite(x) or x <= 0 for x in values):
+        raise ValueError("Candle close values must be finite and positive.")
+    return values
+
+
+def trend_signal(candles):
+    closes = _closes(candles)
+    if len(closes) < 30:
+        return {"signal": "HOLD", "reason": "Insufficient history"}
+    fast, slow = mean(closes[-5:]), mean(closes[-25:])
+    score = max(-1.0, min(1.0, (fast / slow - 1.0) / 0.02))
+    return {"signal": "BUY" if score >= 0.3 else "SELL" if score <= -0.3 else "HOLD",
+            "score": round(score, 4), "reason": "moving-average trend"}
+
+
+def momentum_signal(candles):
+    closes = _closes(candles)
+    if len(closes) < 30:
+        return {"signal": "HOLD", "reason": "Insufficient history"}
+    returns = [closes[i] / closes[i - 1] - 1 for i in range(len(closes) - 14, len(closes))]
+    volatility = pstdev(returns) if len(returns) > 1 else 0.0
+    momentum = closes[-1] / closes[-7] - 1
+    if volatility >= 0.04:
+        return {"signal": "HOLD", "reason": "high-volatility filter"}
+    return {"signal": "BUY" if momentum >= 0.025 else "SELL" if momentum <= -0.025 else "HOLD",
+            "score": round(momentum, 5), "reason": "six-candle momentum"}
+
+
+def mean_reversion_signal(candles):
+    closes = _closes(candles)
+    if len(closes) < 30:
+        return {"signal": "HOLD", "reason": "Insufficient history"}
+    recent = closes[-20:]
+    avg, sd = mean(recent), pstdev(recent)
+    z = (closes[-1] - avg) / sd if sd else 0.0
+    # Avoid fading a strong directional move.
+    trend = mean(closes[-5:]) / mean(closes[-20:]) - 1
+    if abs(trend) > 0.025:
+        return {"signal": "HOLD", "reason": "trend filter"}
+    return {"signal": "BUY" if z <= -1.0 else "SELL" if z >= 1.0 else "HOLD",
+            "score": round(z, 4), "reason": "mean reversion z-score"}
+
+
+CANDIDATES = {
+    "combined_signal_v1": combined_signal,
+    "trend_v1": trend_signal,
+    "momentum_v1": momentum_signal,
+    "mean_reversion_v1": mean_reversion_signal,
+}
+
+
+def _run_segment(data, signal_fn, cfg, warmup=()):
+    prefix = list(warmup)
+    combined = prefix + list(data)
+    warmup_count = len(prefix)
+
+    def segment_only_signal(seen):
+        if len(seen) <= warmup_count:
+            return {"signal": "HOLD", "reason": "segment warm-up"}
+        return signal_fn(seen)
+
+    return run_backtest(combined, segment_only_signal, BacktestConfig(**cfg))
+
+
 def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
                         slippage_bps=8.0, position_fraction=0.10,
                         train_fraction=0.60, validation_fraction=0.20):
-    """Report separate chronological train/validation/test windows.
+    """Compare fixed candidate strategies on train/validation; score selected one on holdout.
 
-    This is a diagnostic, not an optimizer: the current strategy is fixed, so no
-    parameter selection occurs on the held-out test segment.
+    Strategy selection uses validation only. The final test segment is not used to select
+    the strategy. This remains an approximate simulator, not a profitability guarantee.
     """
     data = list(candles)
     if len(data) < 120:
@@ -25,9 +94,7 @@ def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
     timestamps = [str(c.get("timestamp", i)) for i, c in enumerate(data)]
     if timestamps != sorted(timestamps):
         raise ValueError("Candles must be chronological before walk-forward evaluation.")
-    closes = [float(c["close"]) for c in data]
-    if any(not (p > 0 and p < float("inf")) for p in closes):
-        raise ValueError("Candle close values must be finite and positive.")
+    _closes(data)
     n = len(data)
     a = max(60, int(n * train_fraction))
     b = max(a + 1, int(n * (train_fraction + validation_fraction)))
@@ -35,25 +102,42 @@ def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
         raise ValueError("Evaluation split leaves no final test window.")
     cfg = dict(initial_cash=initial_cash, fee_bps=fee_bps, slippage_bps=slippage_bps,
                allow_shorts=True, position_fraction=position_fraction)
-    results = {}
-    for name, segment in (("train", data[:a]), ("validation", data[a:b]), ("test", data[b:])):
-        # Keep the model's minimum lookback available while only scoring trades inside each segment.
-        warmup = data[max(0, (0 if name == "train" else (a if name == "validation" else b)) - 30):
-                      (0 if name == "train" else (a if name == "validation" else b))]
-        combined = list(warmup) + list(segment)
-        warmup_count = len(warmup)
-        def segment_only_signal(prefix):
-            # Avoid scoring or opening a position during the warm-up history.
-            if len(prefix) <= warmup_count:
-                return {"signal": "HOLD", "reason": "segment warm-up"}
-            return combined_signal(prefix)
-        result = run_backtest(combined, segment_only_signal, BacktestConfig(**cfg))
-        results[name] = {"candles": len(segment), **result}
+
+    training = data[:a]
+    validation = data[a:b]
+    test = data[b:]
+    # The prior 30 candles are lookback only; scored fills begin inside each new window.
+    train_results = {}
+    validation_results = {}
+    for name, signal_fn in CANDIDATES.items():
+        train_results[name] = _run_segment(training, signal_fn, cfg)
+        validation_results[name] = _run_segment(validation, signal_fn, cfg, warmup=training[-30:])
+    # Use validation net return penalized by drawdown, not final test performance.
+    def selection_score(result):
+        return float(result["return_pct"]) - 0.5 * float(result["max_drawdown_pct"])
+    selected = max(CANDIDATES, key=lambda name: (selection_score(validation_results[name]),
+                                                  validation_results[name]["return_pct"]))
+    test_result = _run_segment(test, CANDIDATES[selected], cfg, warmup=data[b - 30:b])
+
+    def compact(result):
+        return {key: result[key] for key in ("initial_equity", "final_equity", "net_pnl", "return_pct",
+                 "max_drawdown_pct", "volatility_per_step_pct", "sharpe_per_step", "fill_count", "assumptions")}
+
     return {
         "method": "chronological train / validation / untouched test diagnostic",
-        "strategy": "combined_signal_v1_fixed",
+        "selection_method": "highest validation return_pct minus 0.5 * max_drawdown_pct",
+        "selected_strategy": selected,
+        "candidate_scores": {
+            name: {"train": compact(train_results[name]), "validation": compact(validation_results[name]),
+                   "validation_selection_score": round(selection_score(validation_results[name]), 4)}
+            for name in CANDIDATES
+        },
+        "windows": {
+            "train": {"candles": len(training), **compact(train_results[selected])},
+            "validation": {"candles": len(validation), **compact(validation_results[selected])},
+            "test": {"candles": len(test), **compact(test_result)},
+        },
         "cost_model": {"fee_bps_per_fill": fee_bps, "slippage_bps_per_fill": slippage_bps},
-        "windows": results,
-        "test_is_profitable_after_costs": results["test"]["net_pnl"] > 0,
-        "warning": "This is not a guarantee of future returns. Current backtest mechanics are approximate; independently audit short collateral, liquidation, funding, and exact segment fill accounting before treating results as production-grade.",
+        "test_is_profitable_after_costs": test_result["net_pnl"] > 0,
+        "warning": "Strategy selection is a small heuristic comparison, not machine learning or a guarantee of future returns. The test window is not used for selection. Short collateral, funding, liquidation, and realistic execution still require independent validation.",
     }
