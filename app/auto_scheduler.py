@@ -1,6 +1,7 @@
 """Safe, disabled-by-default background scheduler for paper-only cycles."""
 from __future__ import annotations
 import threading
+from datetime import datetime, timezone
 from typing import Callable, Any
 
 class PaperAutoScheduler:
@@ -15,6 +16,9 @@ class PaperAutoScheduler:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._cycle_lock = threading.Lock()
+        self.last_cycle_at: str | None = None
+        self.last_cycle_status = "never_run"
+        self.last_cycle_error: str | None = None
 
     @property
     def running(self) -> bool:
@@ -42,11 +46,16 @@ class PaperAutoScheduler:
             return {"status": "paused", "reason": "Paper trading is paused."}
         if not self._cycle_lock.acquire(blocking=False):
             return {"status": "skipped", "reason": "A paper cycle is already running."}
+        self.last_cycle_at = datetime.now(timezone.utc).isoformat()
+        self.last_cycle_error = None
         try:
             result = self.run_cycle()
+            self.last_cycle_status = "completed"
             self.audit("AUTO_SCHEDULER_CYCLE", {"status": "completed", "live_trading": False})
             return {"status": "completed", "result": result}
         except Exception as exc:
+            self.last_cycle_status = "failed"
+            self.last_cycle_error = type(exc).__name__
             self.audit("AUTO_SCHEDULER_CYCLE_FAILED", {"error_type": type(exc).__name__, "live_trading": False})
             return {"status": "failed", "reason": type(exc).__name__}
         finally:
@@ -54,5 +63,17 @@ class PaperAutoScheduler:
 
     def _run(self) -> None:
         while not self._stop_event.wait(self.interval_seconds):
-            if self.enabled() and not self.paused():
-                self.run_once()
+            try:
+                if self.enabled() and not self.paused():
+                    self.run_once()
+            except Exception as exc:
+                self.last_cycle_at = datetime.now(timezone.utc).isoformat()
+                self.last_cycle_status = "failed"
+                self.last_cycle_error = type(exc).__name__
+                try:
+                    self.audit("AUTO_SCHEDULER_TICK_FAILED", {
+                        "error_type": type(exc).__name__, "live_trading": False,
+                    })
+                except Exception:
+                    # Keep the scheduler loop alive even when the audit store is unavailable.
+                    pass
