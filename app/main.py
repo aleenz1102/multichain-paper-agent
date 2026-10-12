@@ -631,7 +631,11 @@ def ai_analyze(request: AIAnalysisInput):
             {"role": "user", "content": json.dumps({"mode": "PAPER_ONLY", "live_trading": False, "watchlist": snapshots}, separators=(",", ":"))},
         ],
     }
-    url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1/chat/completions").strip()
+    url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+    if url.endswith("/v1"):
+        url += "/chat/completions"
+    elif not url.endswith("/chat/completions"):
+        url += "/chat/completions"
     if not url.startswith("https://"):
         raise HTTPException(500, "OPENAI_BASE_URL must use HTTPS.")
     req = Request(url, data=json.dumps(body).encode("utf-8"), headers={
