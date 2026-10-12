@@ -8,7 +8,7 @@ from threading import Lock, RLock
 from urllib.request import Request, urlopen
 try:
     from dotenv import load_dotenv
-    load_dotenv(ROOT / ".env")
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 except ImportError:
     pass
 from fastapi import FastAPI, HTTPException
