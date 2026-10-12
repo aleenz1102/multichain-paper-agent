@@ -29,6 +29,18 @@ A simulation-only crypto paper-trading dashboard. No wallet connection, private 
 
 GitHub free Codespaces quotas are limited and can change; check your account's current included usage.
 
+
+### One-command Windows launcher
+
+From PowerShell, in the cloned repository folder, run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\run_windows.ps1
+```
+
+The launcher creates `.venv` if needed, installs the requirements, and binds Uvicorn to `127.0.0.1:8000` only. It does not enable automated paper trading or overwrite `paper_agent.db`. Keep the terminal open while using the app; press Ctrl+C to stop it. If the execution-policy command is blocked by your organization, follow your organization's PowerShell policy rather than changing it globally.
+
 ## Run locally (optional)
 Python 3.10+:
 ```bash
@@ -42,7 +54,7 @@ Open http://localhost:8000
 - Buy and sell fees are charged as a percentage of notional.
 - Slippage is charged against the execution price in basis points.
 - No actual blockchain calls are made. Chains are labels in the synthetic market feed.
-- The daily loss circuit breaker uses realized P&L from simulated SELL orders for the current UTC date; it does not yet auto-trigger on unrealized losses.
+- The daily loss circuit breaker uses realized P&L from simulated SELL orders for the current UTC date. A separate portfolio drawdown circuit breaker uses a persisted equity high-water mark and includes unrealized P&L when valid marks are available.
 - Demo market prices update deterministically on each request. This is not a live market feed.
 - Profit metrics use completed paper trades and are indicative only.
 
@@ -50,3 +62,63 @@ Open http://localhost:8000
 - No live-trading code exists in this starter.
 - Do not add private keys or exchange secrets to this repository.
 - Do not interpret simulated backtests or demo signals as investment advice.
+
+## Automated paper mode (feature branch)
+
+The neon dashboard and opt-in scheduler are being developed on `feat/neon-paper-agent-dashboard` and tracked in [PR #3](https://github.com/aleenz1102/multichain-paper-agent/pull/3). These changes are not merged into `main` yet.
+
+### Windows local run
+
+Use PowerShell from the repository folder:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000`. To run the test suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Do not overwrite your existing `paper_agent.db` when checking out a development branch. Back it up before attempting any migration or reset. The reset button clears simulation records and is intentionally destructive.
+
+### Automated simulation controls
+
+- Automated paper mode is **disabled by default**. Enable it explicitly from the dashboard; then the in-process scheduler evaluates the supported crypto symbols every five minutes while the engine is not paused.
+- Keep Uvicorn at one worker while using the in-process scheduler. Multiple workers/processes can each start their own scheduler; this build is not a distributed scheduler.
+- Daily realized-loss, per-entry size, max concurrent positions, max portfolio exposure, and portfolio drawdown checks are enforced in the paper order path. A pause/kill switch blocks orders. Public quotes or portfolio valuations that are stale/missing are blocked rather than silently replaced by demo prices.
+- The default `synthetic` market mode is for UI and strategy experimentation only. `live_public` mode uses unauthenticated public pricing for the supported watchlist, but the order engine still only creates simulated fills.
+- Public CoinGecko prices are requested in INR to match the virtual portfolio currency and are cached briefly to reduce repeated polling and rate-limit pressure. Unsupported or stale holdings make valuation incomplete and block new orders.
+- An optional AI panel is advisory-only. To enable it, set `OPENAI_API_KEY` in your local PowerShell session before launching Uvicorn; optionally set `OPENAI_MODEL` and `OPENAI_BASE_URL`. The key is not accepted by the browser and is not written to SQLite. AI output is never parsed into orders.
+
+Example (current PowerShell session only; the key is not saved permanently):
+
+```powershell
+$env:OPENAI_API_KEY = "your-key-here"
+$env:OPENAI_MODEL = "gpt-4o-mini"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+### Important readiness boundary
+
+This remains a paper-trading research project, not a certified production trading service. Before relying on it for unattended testing, run the full tests and Windows smoke test locally, review the provider's API terms/rate limits, and monitor the app during a long paper session. No profitability is implied. Live trading, exchange credentials, wallets, and real order execution are deliberately out of scope.
+
+
+## Autonomous paper research additions (feature branch)
+
+The development branch `feat/autonomous-paper-trader` builds on PR #3 and adds:
+
+- `GET /api/intelligence/universe`: ranks Binance public USDT spot tickers by 24-hour liquidity, momentum, trading activity, and an extreme-range penalty. It excludes stablecoin quotes and common leveraged-token suffixes. The score is a ranking heuristic, not a probability of profit.
+- `GET /api/intelligence/news`: reads public CoinDesk and Cointelegraph RSS feeds with a five-minute cache and an explainable keyword sentiment score. RSS availability and source terms can be noisy; headlines are not a reliable prediction model.
+- Automated paper cycles can select the highest-ranked supported assets and block a new BUY when a directly matched recent headline has sufficiently negative lexicon sentiment. Positive headlines never force a BUY. The current execution universe is restricted to symbols with configured price mappings in the existing paper ledger; the scanner can display a broader universe than the executor supports.
+- `POST /api/research/walk-forward/{symbol}`: fetches completed public Binance candles and reports chronological train, validation, and test windows with configured simulated fees and slippage.
+- `POST /api/research/walk-forward`: runs the same research report on supplied OHLCV candles.
+
+### Research and operating caveats
+
+This is still **paper-only research software, not a certified production trading system**. The walk-forward endpoint compares four simple candidate strategies on chronological training and validation windows, selects using a validation return/drawdown score, then evaluates the selected candidate on a held-out test window. This is a small heuristic selection procedure, not robust machine learning or proof of edge. The current backtest is an educational close-to-next-close model and still needs independent review of short collateral, funding, liquidation, exact segment accounting, and survivorship bias before its metrics are trusted. News scoring is a small keyword heuristic, not a trained financial NLP model. The public market scanner is not a guarantee that a listed asset is tradable through every venue.
+
+Minimum starting balance for paper trading is **₹0 real money**; the virtual balance is configurable and only exists in SQLite. No Binance API key, signed request, wallet, or real order is present. Do not enable real trading by merely adding credentials; a separate reviewed execution adapter and a new safety review would be required.

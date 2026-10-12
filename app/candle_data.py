@@ -5,6 +5,7 @@ Only completed candles are returned. This module never submits orders.
 from datetime import datetime, timezone
 import json
 import math
+import re
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -27,7 +28,7 @@ class BinancePublicCandleProvider:
     def __init__(
         self,
         interval="5m",
-        limit=100,
+        limit=250,
         timeout_seconds=8,
         stale_after_seconds=600,
         opener=urlopen,
@@ -49,7 +50,11 @@ class BinancePublicCandleProvider:
         symbol = symbol.upper()
         pair = SYMBOL_PAIRS.get(symbol)
         if not pair:
-            raise CandleDataError(f"No candle market mapping configured for {symbol}.")
+            # Dynamic universe scanning only proposes spot USDT base assets. Validate
+            # strictly before constructing a public read-only market-data request.
+            if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
+                raise CandleDataError(f"Invalid market symbol {symbol!r}.")
+            pair = symbol + "USDT"
 
         params = urlencode({
             "symbol": pair,
