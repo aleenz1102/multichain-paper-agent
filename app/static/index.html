@@ -108,7 +108,7 @@ async function refreshIntelligence(){
   $('market').innerHTML=(u.items||[]).map(x=>{
    const supported=supportedSymbols.has(x.symbol);
    const action=supported
-    ? '<button onclick="quick(\\''+esc(x.symbol)+'\\',\\'BUY\\')">Paper buy</button>'
+    ? '<button onclick="quick(\''+esc(x.symbol)+'\',\'BUY\')">Paper buy</button>'
     : '<span class="pill hold">Watch only</span>';
    return '<tr><td><strong>'+esc(x.symbol)+'</strong><div class="small">'+esc(x.pair)+'</div></td>'+
     '<td>$'+num(x.price_usdt,8)+'</td>'+
@@ -117,7 +117,7 @@ async function refreshIntelligence(){
     '<td>'+num(x.trades_24h,0)+'</td>'+
     '<td><span class="pill">'+num(Number(x.trend_score||0)*100,1)+'%</span></td><td>'+action+'</td></tr>';
   }).join('')||'<tr><td colspan="7">No qualifying markets returned.</td></tr>';
-  $('trendingRows').innerHTML=(u.items||[]).map(x=>'<tr><td><strong>'+esc(x.symbol)+'</strong><div class="small">'+esc(x.pair)+'</div></td><td class="'+(Number(x.change_24h_pct)>=0?'positive':'negative')+'">'+num(x.change_24h_pct,2)+'%</td><td>'+num(x.quote_volume_24h_usdt,0)+'</td><td>'+num(x.trend_score,3)+'</td><td><button onclick="runBacktest(\\''+esc(x.symbol)+'\\')">Backtest</button></td></tr>').join('')||'<tr><td colspan="5">No qualifying markets.</td></tr>';
+  $('trendingRows').innerHTML=(u.items||[]).map(x=>'<tr><td><strong>'+esc(x.symbol)+'</strong><div class="small">'+esc(x.pair)+'</div></td><td class="'+(Number(x.change_24h_pct)>=0?'positive':'negative')+'">'+num(x.change_24h_pct,2)+'%</td><td>'+num(x.quote_volume_24h_usdt,0)+'</td><td>'+num(x.trend_score,3)+'</td><td><button onclick="runBacktest(\''+esc(x.symbol)+'\')">Backtest</button></td></tr>').join('')||'<tr><td colspan="5">No qualifying markets.</td></tr>';
   $('newsList').innerHTML=(n.items||[]).map(x=>'<div class="newsitem"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">'+esc(x.title)+'</a><div class="small">'+esc(x.source)+' · '+esc(x.published_at||'time unknown')+' · '+esc(x.sentiment?.label||'unknown')+' sentiment ('+num(x.sentiment?.confidence,2)+' confidence)</div></div>').join('')||'<div class="small">No current headlines available. News unavailable is treated as unknown, not bullish.</div>';
   if(n.provider_status==='unavailable')$('newsList').insertAdjacentHTML('afterbegin','<div class="small negative">RSS feeds unavailable; news veto is inactive until data returns.</div>');
  }catch(e){
