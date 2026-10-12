@@ -527,7 +527,11 @@ def auto_trade_run(request: AutoMonitorEvaluation):
             try:
                 scan = universe_provider.scan(limit=100, min_quote_volume=2_000_000)
                 supported = {a["symbol"] for a in ASSETS if a["symbol"] in COINGECKO_IDS and a["symbol"] != "USDC"}
+                if scan.get("provider_status") == "stale_cache":
+                    raise HTTPException(503, "Trending market scan is stale; paper cycle blocked.")
                 symbols = [x["symbol"] for x in scan["items"] if x["symbol"] in supported][:8]
+                if not symbols:
+                    raise HTTPException(503, "No supported liquid trending symbols are available; paper cycle blocked.")
             except RuntimeError as exc:
                 raise HTTPException(503, "Trending market scan unavailable; no paper cycle was run.") from exc
         monitor = _build_signal_monitor()
@@ -709,10 +713,12 @@ def _news_veto(symbol: str) -> dict:
     if not matched:
         return {"veto_buy": False, "matched_articles": 0, "sentiment": "unknown",
                 "reason": "No sufficiently direct recent news match; no sentiment assumption applied."}
-    scores = [float(x.get("sentiment", {}).get("score", 0)) for x in matched]
-    confidence = max((float(x.get("sentiment", {}).get("confidence", 0)) for x in matched), default=0)
-    score = sum(scores) / len(scores)
-    veto = score < -0.15 and confidence >= 0.5
+    scored = [(float(x.get("sentiment", {}).get("score", 0)), float(x.get("sentiment", {}).get("confidence", 0))) for x in matched]
+    confidence = max((conf for _, conf in scored), default=0)
+    score = sum(value for value, _ in scored) / len(scored)
+    # A single high-confidence negative direct mention is enough to veto an entry;
+    # positive generic headlines must not wash out a specific exploit/hack story.
+    veto = any(value < -0.15 and conf >= 0.5 for value, conf in scored)
     return {"veto_buy": veto, "matched_articles": len(matched), "sentiment_score": round(score, 3),
             "confidence": confidence, "sentiment": "negative" if score < -0.15 else "positive" if score > 0.15 else "neutral",
             "reason": "Negative recent headlines veto new BUY entries." if veto else "News is advisory; no negative-news veto triggered."}
