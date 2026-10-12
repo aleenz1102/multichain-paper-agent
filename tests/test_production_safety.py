@@ -39,6 +39,13 @@ class ProductionSafetyTests(unittest.TestCase):
             main.get_live_market(" , ")
         self.assertEqual(error.exception.status_code, 400)
 
+    def test_live_market_provider_error_returns_service_unavailable(self):
+        with patch.object(main.live_provider, "get_prices", side_effect=RuntimeError("provider detail")):
+            with self.assertRaises(HTTPException) as error:
+                main.get_live_market("SOL")
+        self.assertEqual(error.exception.status_code, 503)
+        self.assertNotIn("provider detail", str(error.exception.detail))
+
     def test_universe_limits_are_bounded(self):
         with self.assertRaises(HTTPException) as error:
             main.intelligence_universe(limit=101)
