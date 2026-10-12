@@ -18,6 +18,11 @@
 </section>
 <section class="card"><div class="row spread"><div><h2>Today’s USDT setups</h2><div class="small">Liquidity-filtered candidates ranked with completed-candle signals. BUY requires a rule-based signal; no profit guarantee.</div></div><button onclick="loadDailyCandidates()">Rescan candidates</button></div><div id="candidateStatus" class="small" style="margin:8px 0">Scanning liquid USDT markets...</div><div class="tablewrap" style="max-height:300px;min-height:100px"><table><thead><tr><th>Pair</th><th>Signal</th><th>Score</th><th>24h change</th><th>Market regime</th><th>Reference trade plan</th><th>Why</th><th>Action</th></tr></thead><tbody id="candidateRows"><tr><td colspan="8">Waiting for live scan...</td></tr></tbody></table></div></section>
 <section class="layout">
+<section class="card" id="moversCard"><h2>TOP MOVERS | USDT SPOT</h2>
+<div class="sub" id="moversStatus">Loading public market movers...</div>
+<div class="row" style="margin:8px 0"><button onclick="loadMovers('gainers')">Gainers</button><button onclick="loadMovers('losers')">Losers</button><button onclick="loadMovers('volatile')">High volatility</button></div>
+<div class="tablewrap" style="max-height:300px;overflow:auto"><table><thead><tr><th>PAIR</th><th>PRICE</th><th>24H %</th><th>QUOTE VOL</th><th>24H RANGE</th><th>ACTION</th></tr></thead><tbody id="moversRows"><tr><td colspan="6">Loading...</td></tr></tbody></table></div>
+<div class="small">Volatility is movement in either direction, not a buy recommendation.</div></section>
 <div class="card market-card"><div class="row spread"><h2>Live USDT market terminal</h2><span class="small" id="liveMarketMeta">Connecting to public market scanner...</span></div><div class="notice" style="margin:8px 0">LIVE MARKET DATA ≠ LIVE EXECUTION. Prices and 24-hour statistics come from Binance public spot ticker snapshots. All orders remain paper-simulated.</div><div class="tablewrap"><table><thead><tr><th>Asset / Pair</th><th>Price (USDT)</th><th>24h change</th><th>24h volume (USDT)</th><th>Trades</th><th>Trend score</th><th>Paper action</th></tr></thead><tbody id="market"><tr><td colspan="7">Loading live public market data...</td></tr></tbody></table></div><div class="small" style="margin-top:8px">Only Binance spot USDT pairs are shown. Click any pair for live ticker, completed candlesticks and an explainable BUY / HOLD / SELL research signal. Public REST data refreshes periodically; it is not a tick-by-tick WebSocket feed.</div>
 <div class="market-detail" id="marketDetail"><div class="row spread"><div><h2 id="detailTitle">Selected market  |  BTC/USDT</h2><div class="small" id="detailMeta">Loading live ticker and completed candles...</div></div><div class="market-toolbar"><button class="active" data-interval="5m" onclick="setIntervalMarket('5m',this)">5m</button><button data-interval="15m" onclick="setIntervalMarket('15m',this)">15m</button><button data-interval="1h" onclick="setIntervalMarket('1h',this)">1h</button><button data-interval="4h" onclick="setIntervalMarket('4h',this)">4h</button><button data-interval="1d" onclick="setIntervalMarket('1d',this)">1d</button></div></div>
 <div class="detail-stats"><div class="detail-stat"><div class="label">Last price</div><div class="value" id="detailPrice">—</div></div><div class="detail-stat"><div class="label">24h change</div><div class="value" id="detailChange">—</div></div><div class="detail-stat"><div class="label">24h volume (USDT)</div><div class="value" id="detailVolume">—</div></div><div class="detail-stat"><div class="label">24h range</div><div class="value" id="detailRange">—</div></div></div>
@@ -47,7 +52,7 @@
 </main>
 <script>
 const $=id=>document.getElementById(id);const money=n=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(Number(n||0));const num=(n,d=4)=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:d});
-async function api(path,opts={}){const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});let d=await r.json();if(!r.ok)throw Error(d.detail||'Request failed');return d}
+async function api(path,opts={}){const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});let d;try{d=await r.json()}catch(e){d={detail:'Server returned non-JSON response ('+r.status+').'}}if(!r.ok){const v=d?.detail??d?.message??('Request failed ('+r.status+')');throw Error(typeof v==='string'?v:JSON.stringify(v))}return d}
 function sig(s){return s==='BUY'?'buy':s==='SELL'?'sell':'hold'}function val(id,n){$(id).textContent=money(n);$(id).className='value '+(n>0?'positive':n<0?'negative':'')}
 async function refresh(){
  const get=async path=>{try{return await api(path)}catch(err){return {_error:err.message}}};
@@ -104,7 +109,7 @@ async function refreshLiveStats(){
  finally{liveStatsInFlight=false;}
 }
 function quick(sym,side){$('symbol').value=sym;$('side').value=side;$('amount').focus()}
-async function placeOrder(){try{let d=await api('/api/orders',{method:'POST',body:JSON.stringify({symbol:$('symbol').value,side:$('side').value,amount:Number($('amount').value)})});$('orderMessage').textContent=d.message;await refresh()}catch(e){$('orderMessage').textContent=e.message}}
+async function placeOrder(){try{let d=await api('/api/orders',{method:'POST',body:JSON.stringify({symbol:$('symbol').value,side:$('side').value,amount:Number($('amount').value)})});$('orderMessage').textContent=(d.message||'Paper order completed.')+(d.trade?' | '+d.trade.side+' '+d.trade.symbol+' | qty '+num(d.trade.qty,8)+' | fill '+money(d.trade.price):'');await refresh()}catch(e){$('orderMessage').textContent=e.message}}
 async function sellPercent(percent){try{const sym=$('symbol').value;const x=await api('/api/positions/'+encodeURIComponent(sym)+'/sellable');if(!x.sellable)throw Error('No open paper position for '+sym);await api('/api/orders',{method:'POST',body:JSON.stringify({symbol:sym,side:'SELL',amount:Math.max(.01,x.market_value*percent/100),sell_percent:percent})});$('orderMessage').textContent='Simulated sell only; no live order sent.';await refresh()}catch(e){$('orderMessage').textContent=e.message}}
 async function saveAutomation(){try{await api('/api/settings',{method:'PATCH',body:JSON.stringify({auto_monitor_enabled:$('autoEnabled').checked})});$('orderMessage').textContent='Automation preference saved.';await refresh()}catch(e){$('orderMessage').textContent=e.message}}
 async function runAutoCycle(){try{const d=await api('/api/auto-trade/run',{method:'POST',body:JSON.stringify({symbols:['SOL','ETH','ARB','BNB']})});const fills=(d.paper_actions||[]).filter(x=>x.status==='paper_filled').length;const skipped=(d.paper_actions||[]).filter(x=>x.status!=='paper_filled');$('orderMessage').textContent='Cycle evaluated '+(d.evaluated||0)+' symbols; '+fills+' paper fills. '+(skipped.length?skipped.map(x=>x.symbol+': '+(x.reason||x.status)).join('  |  '):'No live orders submitted.');await refresh()}catch(e){$('orderMessage').textContent=e.message}}
@@ -219,6 +224,33 @@ async function refreshIntelligence(){
  if(!items.some(x=>String(x.symbol||'').replace(/USDT$/,'')===selectedMarket)&&items.length)selectedMarket=String(items[0].symbol||'BTC').replace(/USDT$/,'');
  if(!marketDetailTimer){loadMarketDetail(selectedMarket);connectMarketStream(selectedMarket);marketDetailTimer=setInterval(()=>loadMarketDetail(selectedMarket),10000);}
  }catch(e){$('intelStatus').textContent='Market intelligence unavailable: '+e.message;$('liveMarketMeta').textContent='Live USDT market scanner unavailable';$('market').innerHTML='<tr><td colspan="7" class="negative">Live market data unavailable: '+esc(e.message)+'</td></tr>';$('newsList').textContent='News unavailable; no positive sentiment is assumed.';}
+}
+let moversMode='gainers';
+async function loadMovers(mode='gainers'){
+ moversMode=mode;const labels={gainers:'Top 24h gainers',losers:'Top 24h losers',volatile:'Largest 24h ranges'};
+ $('moversStatus').textContent='Refreshing '+labels[mode]+' from public USDT spot markets...';
+ try{const d=await api('/api/intelligence/movers?limit=20&min_quote_volume_usdt=2000000'),items=d[mode]||[];
+ $('moversStatus').textContent=labels[mode]+' | '+items.length+' liquid pairs | '+(d.provider_status||'unknown')+' | '+(d.scanned_at?new Date(d.scanned_at).toLocaleTimeString():'time unknown');
+ $('moversRows').innerHTML=items.map(x=>{const sym=String(x.symbol||'').replace(/USDT$/,''),ch=Number(x.change_24h_pct||0);
+ return '<tr><td><strong>'+esc(sym)+'/USDT</strong></td><td>
+ $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
+ try{
+  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
+  const w=d.windows;
+  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
+   '\\nValidation-selected strategy: '+d.selected_strategy+
+   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
+   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
+   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
+   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
+   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
+   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
+ }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
+}
+$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);loadMovers('gainers');setInterval(()=>loadMovers(moversMode),60000);
+</script></body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
+ }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
+ }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
 }
 async function runBacktest(symbol){
  $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
