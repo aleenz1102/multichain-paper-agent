@@ -1,9 +1,10 @@
 from __future__ import annotations
-import json, math, sqlite3, time
+import json, math, os, sqlite3, time
 from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import Optional
 from threading import Lock, RLock
+from urllib.request import Request, urlopen
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -509,6 +510,78 @@ def auto_trade_run(request: AutoMonitorEvaluation):
         return payload
     finally:
         _auto_cycle_lock.release()
+
+
+@app.get("/api/ai/status")
+def ai_status():
+    configured = bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    return {
+        "enabled": configured,
+        "provider": "openai_compatible",
+        "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+        "key_source": "environment",
+        "key_exposed": False,
+        "can_execute_orders": False,
+        "message": "AI is advisory only. Configure OPENAI_API_KEY locally to enable analysis." if not configured else "AI analysis configured; all trading decisions remain subject to deterministic paper-risk checks.",
+    }
+
+
+class AIAnalysisInput(BaseModel):
+    symbols: list[str] = Field(default=["SOL", "ETH", "ARB", "BNB"], min_length=1, max_length=12)
+
+
+@app.post("/api/ai/analyze")
+def ai_analyze(request: AIAnalysisInput):
+    """Opt-in remote AI commentary. Output is never parsed as a trade/order instruction."""
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(503, "AI is not configured. Set OPENAI_API_KEY in the local environment and restart the app.")
+    selected = list(dict.fromkeys(s.strip().upper() for s in request.symbols if s.strip()))[:12]
+    known = {a["symbol"] for a in ASSETS}
+    if not selected or any(s not in known for s in selected):
+        raise HTTPException(400, "Select known watchlist symbols only.")
+    snapshots = []
+    prices = {x["symbol"]: x for x in market()}
+    for symbol in selected:
+        row = prices.get(symbol, {})
+        snapshots.append({
+            "symbol": symbol,
+            "price": row.get("price"),
+            "data_status": row.get("data_status"),
+            "signal": row.get("signal", "HOLD"),
+            "signal_strength": row.get("signal_strength", 0),
+        })
+    body = {
+        "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+        "temperature": 0.1,
+        "messages": [
+            {"role": "system", "content": "You are a cautious market-research assistant for a simulation-only paper trading application. Give concise risk-aware analysis of the provided public market snapshot. Distinguish missing/stale data. Do not promise returns. Never issue executable orders, tool calls, code, or instructions to bypass risk controls. State that analysis is advisory and not investment advice."},
+            {"role": "user", "content": json.dumps({"mode": "PAPER_ONLY", "live_trading": False, "watchlist": snapshots}, separators=(",", ":"))},
+        ],
+    }
+    url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1/chat/completions").strip()
+    if not url.startswith("https://"):
+        raise HTTPException(500, "OPENAI_BASE_URL must use HTTPS.")
+    req = Request(url, data=json.dumps(body).encode("utf-8"), headers={
+        "Authorization": "Bearer " + api_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "multichain-paper-agent/1.0",
+    }, method="POST")
+    try:
+        with urlopen(req, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        analysis = result["choices"][0]["message"]["content"]
+        if not isinstance(analysis, str) or not analysis.strip():
+            raise ValueError("empty AI content")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        audit("AI_ANALYSIS_FAILED", {"error_type": type(exc).__name__})
+        raise HTTPException(502, "AI provider request failed. Check server configuration and try again.") from exc
+    audit("AI_ANALYSIS_COMPLETED", {"provider": "openai_compatible", "model": body["model"], "symbols": selected, "orders_submitted": False})
+    return {"analysis": analysis, "provider": "openai_compatible", "model": body["model"],
+            "advisory_only": True, "live_trading": False, "orders_submitted": False}
 
 
 @app.get("/api/metrics")
