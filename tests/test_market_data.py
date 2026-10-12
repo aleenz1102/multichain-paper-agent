@@ -33,6 +33,7 @@ class MarketDataTests(unittest.TestCase):
         with patch("app.market_data.time.time", return_value=1010.0):
             second = provider.get_prices(["SOL"])
         self.assertEqual(len(calls), 1)
+        self.assertIn("vs_currencies=inr", calls[0])
         self.assertEqual(first["SOL"].price, 12000.0)
         self.assertEqual(second["SOL"].price, 12000.0)
         self.assertEqual(second["SOL"].status, "fresh")
@@ -40,7 +41,7 @@ class MarketDataTests(unittest.TestCase):
 
     def test_invalid_nonfinite_and_zero_prices_are_not_cached(self):
         provider = CoinGeckoFreeProvider(opener=lambda *_args, **_kwargs: FakeResponse({
-            "solana": {"usd": float("nan")}
+            "solana": {"inr": float("nan")}
         }))
         with patch("app.market_data.time.time", return_value=1000.0):
             result = provider.get_prices(["SOL"])
