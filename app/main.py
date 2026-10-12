@@ -423,6 +423,7 @@ def order(o: Order):
                     "drawdown_limit_pct": drawdown_limit,
                     "valuation_complete": valuation_complete,
                 })
+            # Circuit breakers block additional risk, not position-reducing exits.
             if side == "BUY":
                 if risk_reason == "daily_loss":
                     raise HTTPException(400, "Daily realized-loss limit reached. New paper entries are locked until the UTC day resets.")
