@@ -105,3 +105,20 @@ $env:OPENAI_MODEL = "gpt-4o-mini"
 ### Important readiness boundary
 
 This remains a paper-trading research project, not a certified production trading service. Before relying on it for unattended testing, run the full tests and Windows smoke test locally, review the provider's API terms/rate limits, and monitor the app during a long paper session. No profitability is implied. Live trading, exchange credentials, wallets, and real order execution are deliberately out of scope.
+
+
+## Autonomous paper research additions (feature branch)
+
+The development branch `feat/autonomous-paper-trader` builds on PR #3 and adds:
+
+- `GET /api/intelligence/universe`: ranks Binance public USDT spot tickers by 24-hour liquidity, momentum, trading activity, and an extreme-range penalty. It excludes stablecoin quotes and common leveraged-token suffixes. The score is a ranking heuristic, not a probability of profit.
+- `GET /api/intelligence/news`: reads public CoinDesk and Cointelegraph RSS feeds with a five-minute cache and an explainable keyword sentiment score. RSS availability and source terms can be noisy; headlines are not a reliable prediction model.
+- Automated paper cycles can select the highest-ranked supported assets and block a new BUY when a directly matched recent headline has sufficiently negative lexicon sentiment. Positive headlines never force a BUY. The current execution universe is restricted to symbols with configured price mappings in the existing paper ledger; the scanner can display a broader universe than the executor supports.
+- `POST /api/research/walk-forward/{symbol}`: fetches completed public Binance candles and reports chronological train, validation, and test windows with configured simulated fees and slippage.
+- `POST /api/research/walk-forward`: runs the same research report on supplied OHLCV candles.
+
+### Research and operating caveats
+
+This is still **paper-only research software, not a certified production trading system**. The current strategy is fixed; the walk-forward endpoint evaluates it but does not perform robust automated hyperparameter selection. The current backtest is an educational close-to-next-close model and still needs independent review of short collateral, funding, liquidation, exact segment accounting, and survivorship bias before its metrics are trusted. News scoring is a small keyword heuristic, not a trained financial NLP model. The public market scanner is not a guarantee that a listed asset is tradable through every venue.
+
+Minimum starting balance for paper trading is **₹0 real money**; the virtual balance is configurable and only exists in SQLite. No Binance API key, signed request, wallet, or real order is present. Do not enable real trading by merely adding credentials; a separate reviewed execution adapter and a new safety review would be required.
