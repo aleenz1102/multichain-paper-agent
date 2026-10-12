@@ -29,6 +29,18 @@ A simulation-only crypto paper-trading dashboard. No wallet connection, private 
 
 GitHub free Codespaces quotas are limited and can change; check your account's current included usage.
 
+
+### One-command Windows launcher
+
+From PowerShell, in the cloned repository folder, run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\run_windows.ps1
+```
+
+The launcher creates `.venv` if needed, installs the requirements, and binds Uvicorn to `127.0.0.1:8000` only. It does not enable automated paper trading or overwrite `paper_agent.db`. Keep the terminal open while using the app; press Ctrl+C to stop it. If the execution-policy command is blocked by your organization, follow your organization's PowerShell policy rather than changing it globally.
+
 ## Run locally (optional)
 Python 3.10+:
 ```bash
