@@ -2,6 +2,7 @@ from __future__ import annotations
 import json, math, os, sqlite3, time
 from datetime import datetime, timezone, date
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Optional
 from threading import Lock, RLock
 from urllib.request import Request, urlopen
@@ -47,10 +48,15 @@ DEFAULTS = {
 _order_lock = RLock()
 _auto_cycle_lock = Lock()
 def now_iso(): return datetime.now(timezone.utc).isoformat()
+@contextmanager
 def connect():
-    c = sqlite3.connect(DB_PATH)
+    """Yield a row-enabled SQLite connection and always close the file handle."""
+    c = sqlite3.connect(DB_PATH, timeout=10)
     c.row_factory = sqlite3.Row
-    return c
+    try:
+        yield c
+    finally:
+        c.close()
 def init_db():
     with connect() as c:
         c.execute("""CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
