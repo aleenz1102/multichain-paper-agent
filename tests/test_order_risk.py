@@ -49,6 +49,25 @@ class OrderRiskTests(unittest.TestCase):
                 main.order(main.Order(symbol="SOL", side="BUY", amount=200))
         self.assertIn("exposure", error.exception.detail.lower())
 
+    def test_missing_quote_marks_valuation_incomplete(self):
+        main.order(main.Order(symbol="SOL", side="BUY", amount=1000))
+        main.set_setting("market_data_mode", "live_public")
+        with patch.object(main.live_provider, "get_prices", return_value={}):
+            valuation = main.portfolio()
+        self.assertFalse(valuation["valuation_complete"])
+        self.assertIn("SOL", valuation["unpriced_positions"])
+        self.assertIsNone(valuation["positions"][0]["mark_price"])
+
+    def test_sell_exit_not_blocked_by_buy_allocation_cap(self):
+        main.order(main.Order(symbol="SOL", side="BUY", amount=1000))
+        main.set_setting("max_trade_pct", 1.0)
+        with patch.object(main, "market", wraps=main.market):
+            valuation = main.portfolio()
+            position = next(x for x in valuation["positions"] if x["symbol"] == "SOL")
+            response = main.order(main.Order(symbol="SOL", side="SELL", amount=position["market_value"], sell_percent=100))
+        self.assertTrue(response["ok"])
+        self.assertEqual(main.portfolio()["position_count"], 0)
+
     def test_sell_cannot_sell_more_than_held(self):
         main.order(main.Order(symbol="SOL", side="BUY", amount=1000))
         with self.assertRaises(HTTPException) as error:
