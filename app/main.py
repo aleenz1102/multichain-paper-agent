@@ -11,6 +11,7 @@ from app.strategy import combined_signal
 from app.backtest import BacktestConfig, run_backtest
 from app.auto_monitor import MonitorConfig, PaperSignalMonitor
 from app.candle_data import BinancePublicCandleProvider
+from app.auto_scheduler import PaperAutoScheduler
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT.parent / "paper_agent.db"
@@ -146,8 +147,25 @@ class SettingsUpdate(BaseModel):
     max_positions: Optional[int] = Field(default=None, ge=1, le=30)
     auto_monitor_enabled: Optional[bool] = None
     virtual_cash: Optional[float] = Field(default=None, ge=1000, le=100000000)
+_auto_scheduler: PaperAutoScheduler | None = None
+
 @app.on_event("startup")
-def startup(): init_db()
+def startup():
+    global _auto_scheduler
+    init_db()
+    _auto_scheduler = PaperAutoScheduler(
+        enabled=lambda: bool(settings().get("auto_monitor_enabled", False)),
+        paused=lambda: bool(settings().get("paused", False)),
+        run_cycle=lambda: auto_trade_run(AutoMonitorEvaluation()),
+        audit=audit,
+        interval_seconds=300,
+    )
+    _auto_scheduler.start()
+
+@app.on_event("shutdown")
+def shutdown():
+    if _auto_scheduler is not None:
+        _auto_scheduler.stop(timeout=10)
 @app.get("/", response_class=HTMLResponse)
 def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 @app.get("/api/health")
