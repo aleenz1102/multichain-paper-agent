@@ -41,7 +41,13 @@ def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
         warmup = data[max(0, (0 if name == "train" else (a if name == "validation" else b)) - 30):
                       (0 if name == "train" else (a if name == "validation" else b))]
         combined = list(warmup) + list(segment)
-        result = run_backtest(combined, combined_signal, BacktestConfig(**cfg))
+        warmup_count = len(warmup)
+        def segment_only_signal(prefix):
+            # Avoid scoring or opening a position during the warm-up history.
+            if len(prefix) <= warmup_count:
+                return {"signal": "HOLD", "reason": "segment warm-up"}
+            return combined_signal(prefix)
+        result = run_backtest(combined, segment_only_signal, BacktestConfig(**cfg))
         results[name] = {"candles": len(segment), **result}
     return {
         "method": "chronological train / validation / untouched test diagnostic",
