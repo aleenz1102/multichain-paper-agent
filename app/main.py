@@ -336,8 +336,14 @@ def auto_monitor_status():
         "interval_seconds": 300,
         "mode": "PAPER_AUTO_TRADE" if s.get("auto_monitor_enabled", False) else "AUDIT_ONLY",
         "orders_submitted": False,
+        "scheduler_running": bool(_auto_scheduler and _auto_scheduler.running),
+        "interval_seconds": _auto_scheduler.interval_seconds if _auto_scheduler else 300,
         "candle_provider": "binance_public_klines",
-        "message": "No automatic scheduler or order execution is active.",
+        "message": (
+            "Scheduler is active; paper cycles run every five minutes while enabled and unpaused."
+            if _auto_scheduler and _auto_scheduler.running and s.get("auto_monitor_enabled", False)
+            else "Scheduler is idle unless automated paper trading is enabled; all execution remains simulated."
+        ),
     }
 
 
