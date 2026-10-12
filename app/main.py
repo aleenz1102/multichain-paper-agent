@@ -115,21 +115,31 @@ def audit(event, detail):
 def market():
     """Return one selected quote source; never silently mix live and synthetic prices."""
     if settings().get("market_data_mode", "synthetic") == "live_public":
-        symbols = [a["symbol"] for a in ASSETS if a["symbol"] != "USDC"]
-        prices = live_provider.get_prices(symbols)
+        # Share one fresh public USDT universe across scanner, ticket, and valuation.
+        try:
+            live_rows = universe_provider.scan(limit=100, min_quote_volume=2_000_000).get("items", [])
+        except Exception:
+            live_rows = []
+        known = {a["symbol"]: a for a in ASSETS if a["symbol"] != "USDC"}
         output = []
-        for asset in ASSETS:
-            symbol = asset["symbol"]
-            if symbol == "USDC":
-                output.append({**asset, "price": 1.0, "change_pct": 0.0, "signal": "HOLD",
-                               "signal_strength": 0.0, "data_status": "REFERENCE ONLY"})
+        for row in live_rows:
+            symbol = str(row.get("symbol", "")).upper()
+            price = row.get("price_usdt")
+            if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
                 continue
-            item = prices.get(symbol)
-            fresh = item is not None and item.status == "fresh" and item.price is not None
-            output.append({**asset, "price": float(item.price) if fresh else None,
-                           "change_pct": None, "signal": "HOLD", "signal_strength": 0.0,
-                           "data_status": "LIVE PUBLIC PRICE" if fresh else
-                               ("UNAVAILABLE" if item is None or item.status == "unavailable" else "STALE")})
+            if not isinstance(price, (int, float)) or not math.isfinite(float(price)) or price <= 0:
+                continue
+            base = known.get(symbol, {})
+            output.append({
+                "symbol": symbol, "name": base.get("name", symbol),
+                "chain": base.get("chain", "Binance Spot"), "price": float(price),
+                "change_pct": float(row.get("change_24h_pct", 0)),
+                "volatility": float(row.get("range_24h_pct", 0)) / 100,
+                "liquidity": float(row.get("quote_volume_24h_usdt", 0)),
+                "signal": "HOLD", "signal_strength": 0.0, "data_status": "LIVE PUBLIC PRICE",
+                "quote_volume_24h_usdt": float(row.get("quote_volume_24h_usdt", 0)),
+                "trades_24h": int(row.get("trades_24h", 0)),
+            })
         return output
     tick = int(time.time() // 20)
     output = []
@@ -891,6 +901,29 @@ def intelligence_universe(limit: int = 30, min_quote_volume_usdt: float = 2_000_
         return universe_provider.scan(limit=limit, min_quote_volume=min_quote_volume_usdt)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/api/intelligence/movers")
+def intelligence_movers(limit: int = 20, min_quote_volume_usdt: float = 2_000_000):
+    """Read-only fast-mover watchlist from public USDT spot tickers."""
+    if not 1 <= limit <= 50:
+        raise HTTPException(400, "limit must be between 1 and 50.")
+    if not math.isfinite(min_quote_volume_usdt) or min_quote_volume_usdt < 0:
+        raise HTTPException(400, "min_quote_volume_usdt must be finite and non-negative.")
+    try:
+        scan = universe_provider.scan(limit=100, min_quote_volume=min_quote_volume_usdt)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    items = list(scan.get("items", []))
+    gainers = sorted(items, key=lambda x: float(x.get("change_24h_pct", 0)), reverse=True)
+    losers = sorted(items, key=lambda x: float(x.get("change_24h_pct", 0)))
+    volatile = sorted(items, key=lambda x: float(x.get("range_24h_pct", 0)), reverse=True)
+    momentum = sorted(items, key=lambda x: abs(float(x.get("change_24h_pct", 0))), reverse=True)
+    return {"provider": scan.get("provider", "public market data"),
+            "provider_status": scan.get("provider_status", "unknown"),
+            "scanned_at": scan.get("scanned_at"), "items": momentum[:limit],
+            "gainers": gainers[:limit], "losers": losers[:limit], "volatile": volatile[:limit],
+            "warning": "24h momentum and range are screening signals, not short-interval forecasts or guarantees."}
 
 
 @app.get("/api/intelligence/news")
