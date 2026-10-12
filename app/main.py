@@ -284,7 +284,7 @@ def update_settings(update: SettingsUpdate):
         if any(symbol not in live_prices or live_prices[symbol].price is None or live_prices[symbol].status != "fresh" for symbol in required_symbols):
             raise HTTPException(503, "Required strategy market data is incomplete or stale; provider mode was not changed.")
     for k,v in data.items():
-        if k=="virtual_cash" and rows("SELECT id FROM trades LIMIT 1"):
+        if k=="virtual_cash" and float(v) != float(current.get("virtual_cash", DEFAULTS["virtual_cash"])) and rows("SELECT id FROM trades LIMIT 1"):
             raise HTTPException(400,"Virtual starting cash cannot be changed after the first paper trade.")
         set_setting(k,v)
     audit("SETTINGS_UPDATED",data)
