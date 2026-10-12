@@ -54,6 +54,24 @@ class ProductionSafetyTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             main.intelligence_candidates(limit=100)
 
+    def test_non_finite_order_and_settings_values_are_rejected(self):
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            main.Order(symbol="SOL", side="BUY", amount=float("nan"))
+        with self.assertRaises(ValidationError):
+            main.Order(symbol="SOL", side="BUY", amount=float("inf"))
+        with self.assertRaises(ValidationError):
+            main.SettingsUpdate(max_trade_pct=float("nan"))
+        with self.assertRaises(ValidationError):
+            main.SettingsUpdate(max_drawdown_pct=float("inf"))
+
+    def test_order_symbol_shape_is_validated_before_execution(self):
+        from pydantic import ValidationError
+        for symbol in (" sol", "SOLUSDT!", "S", "THIS_SYMBOL_IS_TOO_LONG_FOR_VALIDATION"):
+            with self.subTest(symbol=symbol):
+                with self.assertRaises(ValidationError):
+                    main.Order(symbol=symbol, side="BUY", amount=10)
+
 
 if __name__ == "__main__":
     unittest.main()
