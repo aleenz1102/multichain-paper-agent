@@ -206,20 +206,20 @@ def portfolio():
             "positions":pos,"position_count":len(pos),
             "valuation_complete":valuation_complete,"unpriced_positions":unpriced_positions}
 class Order(BaseModel):
-    symbol: str
-    side: str
-    amount: float = Field(gt=0, description="Virtual quote-currency amount")
-    sell_percent: Optional[float] = Field(default=None, gt=0, le=100)
+    symbol: str = Field(min_length=2, max_length=20, pattern=r"^[A-Z0-9]{2,20}$")
+    side: str = Field(min_length=3, max_length=4)
+    amount: float = Field(gt=0, allow_inf_nan=False, description="Virtual quote-currency amount")
+    sell_percent: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
 class SettingsUpdate(BaseModel):
-    fee_bps: Optional[float] = Field(default=None, ge=0, le=500)
-    slippage_bps: Optional[float] = Field(default=None, ge=0, le=500)
-    max_trade_pct: Optional[float] = Field(default=None, gt=0, le=100)
-    daily_loss_limit_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    fee_bps: Optional[float] = Field(default=None, ge=0, le=500, allow_inf_nan=False)
+    slippage_bps: Optional[float] = Field(default=None, ge=0, le=500, allow_inf_nan=False)
+    max_trade_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    daily_loss_limit_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
     max_positions: Optional[int] = Field(default=None, ge=1, le=30)
     auto_monitor_enabled: Optional[bool] = None
-    virtual_cash: Optional[float] = Field(default=None, ge=1, le=100000000)
-    max_drawdown_pct: Optional[float] = Field(default=None, gt=0, le=100)
-    max_exposure_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    virtual_cash: Optional[float] = Field(default=None, ge=1, le=100000000, allow_inf_nan=False)
+    max_drawdown_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    max_exposure_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
     market_data_mode: Optional[str] = None
 _auto_scheduler: PaperAutoScheduler | None = None
 
@@ -272,11 +272,11 @@ class CandleInput(BaseModel):
     candles: list[dict] = Field(min_length=2, max_length=5000)
 
 class BacktestInput(CandleInput):
-    initial_cash: float = Field(default=100000, gt=0, le=1000000000)
-    fee_bps: float = Field(default=10, ge=0, le=500)
-    slippage_bps: float = Field(default=8, ge=0, le=500)
+    initial_cash: float = Field(default=100000, gt=0, le=1000000000, allow_inf_nan=False)
+    fee_bps: float = Field(default=10, ge=0, le=500, allow_inf_nan=False)
+    slippage_bps: float = Field(default=8, ge=0, le=500, allow_inf_nan=False)
     allow_shorts: bool = True
-    position_fraction: float = Field(default=0.10, gt=0, le=1)
+    position_fraction: float = Field(default=0.10, gt=0, le=1, allow_inf_nan=False)
 
 @app.post("/api/strategy/signal")
 def strategy_signal(data: CandleInput):
