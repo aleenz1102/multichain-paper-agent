@@ -31,6 +31,9 @@ class PaperAutoSchedulerTests(unittest.TestCase):
         result = scheduler.run_once()
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["result"]["mode"], "PAPER_ONLY")
+        self.assertEqual(scheduler.last_cycle_status, "completed")
+        self.assertIsNotNone(scheduler.last_cycle_at)
+        self.assertIsNone(scheduler.last_cycle_error)
         self.assertTrue(any(name == "AUTO_SCHEDULER_CYCLE" and not data["live_trading"] for name, data in events))
 
     def test_failures_are_contained(self):
@@ -38,6 +41,9 @@ class PaperAutoSchedulerTests(unittest.TestCase):
             raise RuntimeError("sensitive internal detail")
         scheduler, events = self._make(cycle=fail)
         self.assertEqual(scheduler.run_once(), {"status": "failed", "reason": "RuntimeError"})
+        self.assertEqual(scheduler.last_cycle_status, "failed")
+        self.assertEqual(scheduler.last_cycle_error, "RuntimeError")
+        self.assertIsNotNone(scheduler.last_cycle_at)
         self.assertTrue(any(name == "AUTO_SCHEDULER_CYCLE_FAILED" for name, _ in events))
 
     def test_rejects_short_interval(self):
