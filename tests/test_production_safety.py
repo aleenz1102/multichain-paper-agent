@@ -65,6 +65,28 @@ class ProductionSafetyTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             main.SettingsUpdate(max_drawdown_pct=float("inf"))
 
+    def test_automated_trading_refuses_synthetic_mode(self):
+        main.set_setting("auto_monitor_enabled", True)
+        main.set_setting("market_data_mode", "synthetic")
+        with self.assertRaises(HTTPException) as error:
+            main.auto_trade_run(main.AutoMonitorEvaluation())
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("Public market prices", str(error.exception.detail))
+
+    def test_paused_account_rejects_orders(self):
+        main.set_setting("paused", True)
+        with self.assertRaises(HTTPException) as error:
+            main.order(main.Order(symbol="SOL", side="BUY", amount=10))
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("paused", str(error.exception.detail).lower())
+
+    def test_buy_is_blocked_when_portfolio_exposure_limit_would_be_breached(self):
+        main.set_setting("max_exposure_pct", 1.0)
+        with self.assertRaises(HTTPException) as error:
+            main.order(main.Order(symbol="SOL", side="BUY", amount=2000))
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("exposure limit", str(error.exception.detail).lower())
+
     def test_order_symbol_shape_is_validated_before_execution(self):
         from pydantic import ValidationError
         for symbol in (" sol", "SOLUSDT!", "S", "THIS_SYMBOL_IS_TOO_LONG_FOR_VALIDATION"):
