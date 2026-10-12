@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import Optional
 from threading import Lock, RLock
 from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -25,7 +26,18 @@ from app.auto_scheduler import PaperAutoScheduler
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT.parent / "paper_agent.db"
-app = FastAPI(title="Multi-Chain Paper Trading Agent", version="0.2.0")
+app = FastAPI(title="Multi-Chain Paper Trading Agent", version="0.3.0")
+
+# JSON API responses are explicitly non-cacheable by browsers and intermediary proxies.
+@app.middleware("http")
+async def set_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
 live_provider = CoinGeckoFreeProvider()
 universe_provider = TrendingUniverseProvider()
 news_provider = CryptoNewsProvider()
@@ -194,20 +206,20 @@ def portfolio():
             "positions":pos,"position_count":len(pos),
             "valuation_complete":valuation_complete,"unpriced_positions":unpriced_positions}
 class Order(BaseModel):
-    symbol: str
-    side: str
-    amount: float = Field(gt=0, description="Virtual quote-currency amount")
-    sell_percent: Optional[float] = Field(default=None, gt=0, le=100)
+    symbol: str = Field(min_length=2, max_length=20, pattern=r"^[A-Z0-9]{2,20}$")
+    side: str = Field(min_length=3, max_length=4)
+    amount: float = Field(gt=0, allow_inf_nan=False, description="Virtual quote-currency amount")
+    sell_percent: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
 class SettingsUpdate(BaseModel):
-    fee_bps: Optional[float] = Field(default=None, ge=0, le=500)
-    slippage_bps: Optional[float] = Field(default=None, ge=0, le=500)
-    max_trade_pct: Optional[float] = Field(default=None, gt=0, le=100)
-    daily_loss_limit_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    fee_bps: Optional[float] = Field(default=None, ge=0, le=500, allow_inf_nan=False)
+    slippage_bps: Optional[float] = Field(default=None, ge=0, le=500, allow_inf_nan=False)
+    max_trade_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    daily_loss_limit_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
     max_positions: Optional[int] = Field(default=None, ge=1, le=30)
     auto_monitor_enabled: Optional[bool] = None
-    virtual_cash: Optional[float] = Field(default=None, ge=1, le=100000000)
-    max_drawdown_pct: Optional[float] = Field(default=None, gt=0, le=100)
-    max_exposure_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    virtual_cash: Optional[float] = Field(default=None, ge=1, le=100000000, allow_inf_nan=False)
+    max_drawdown_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    max_exposure_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
     market_data_mode: Optional[str] = None
 _auto_scheduler: PaperAutoScheduler | None = None
 
@@ -250,19 +262,33 @@ def get_market():
 def get_live_market(symbols: str = "SOL,ETH,ARB,BNB,JUP,AERO,STRK,PENGU,TIA,HYPE,TRUMP,USDC"):
     """Fetch free public prices. This endpoint does not feed orders or replace demo prices."""
     requested = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
-    data = live_provider.get_prices(requested)
-    return {"mode":"LIVE_PUBLIC_DATA_READ_ONLY", "new_entries_allowed": all(x.status == "fresh" for x in data.values()) and bool(data),
-            "items":[{"symbol":x.symbol,"price_inr":x.price,"currency":"INR","provider":x.provider,"fetched_at":x.fetched_at,"status":x.status,"error":x.error} for x in data.values()]}
+    if not requested:
+        raise HTTPException(400, "Provide at least one supported symbol.")
+    try:
+        data = live_provider.get_prices(requested)
+    except Exception as exc:
+        audit("LIVE_MARKET_FETCH_FAILED", {"error_type": type(exc).__name__, "requested_count": len(requested)})
+        raise HTTPException(503, "Public market prices are temporarily unavailable.") from exc
+    items = [
+        {"symbol": x.symbol, "price_inr": x.price, "currency": "INR",
+         "provider": x.provider, "fetched_at": x.fetched_at, "status": x.status, "error": x.error}
+        for x in data.values()
+    ]
+    return {
+        "mode": "LIVE_PUBLIC_DATA_READ_ONLY",
+        "new_entries_allowed": bool(items) and all(x["status"] == "fresh" and x["price_inr"] is not None for x in items),
+        "items": items,
+    }
 
 class CandleInput(BaseModel):
     candles: list[dict] = Field(min_length=2, max_length=5000)
 
 class BacktestInput(CandleInput):
-    initial_cash: float = Field(default=100000, gt=0, le=1000000000)
-    fee_bps: float = Field(default=10, ge=0, le=500)
-    slippage_bps: float = Field(default=8, ge=0, le=500)
+    initial_cash: float = Field(default=100000, gt=0, le=1000000000, allow_inf_nan=False)
+    fee_bps: float = Field(default=10, ge=0, le=500, allow_inf_nan=False)
+    slippage_bps: float = Field(default=8, ge=0, le=500, allow_inf_nan=False)
     allow_shorts: bool = True
-    position_fraction: float = Field(default=0.10, gt=0, le=1)
+    position_fraction: float = Field(default=0.10, gt=0, le=1, allow_inf_nan=False)
 
 @app.post("/api/strategy/signal")
 def strategy_signal(data: CandleInput):
@@ -312,14 +338,28 @@ def resume():
     return {"paused":False}
 @app.post("/api/reset")
 def reset():
-    with connect() as c:
-        c.execute("DELETE FROM trades"); c.execute("DELETE FROM audit"); c.execute("DELETE FROM cash_adjustments"); c.commit()
-    set_setting("paused",False)
-    set_setting("high_water_equity",float(settings()["virtual_cash"]))
-    set_setting("risk_lockout_reason", "")
-    set_setting("risk_lockout_date", "")
-    audit("SIMULATION_RESET",{"message":"Trade history cleared; virtual cash reset"})
-    return {"ok":True}
+    """Clear simulation records only; never alter settings or backup files.
+
+    Acquire locks in the same order as the paper-cycle path so reset cannot race
+    an active automated cycle. Keep this destructive endpoint on localhost or
+    behind a trusted authenticated reverse proxy.
+    """
+    with _auto_cycle_lock:
+        with _order_lock:
+            set_setting("auto_monitor_enabled", False)
+            set_setting("paused", True)
+            with connect() as c:
+                c.execute("DELETE FROM trades")
+                c.execute("DELETE FROM cash_adjustments")
+                c.commit()
+            set_setting("high_water_equity", float(settings()["virtual_cash"]))
+            set_setting("risk_lockout_reason", "")
+            set_setting("risk_lockout_date", "")
+            set_setting("paused", False)
+    audit("SIMULATION_RESET", {"message": "Paper trade history cleared; settings preserved; no backup file touched"})
+    return {"ok": True}
+
+
 @app.get("/api/portfolio")
 def get_portfolio(): return portfolio()
 class WalletFunding(BaseModel):
@@ -397,6 +437,7 @@ def order(o: Order):
                     "drawdown_limit_pct": drawdown_limit,
                     "valuation_complete": valuation_complete,
                 })
+            # Circuit breakers block additional risk, not position-reducing exits.
             if side == "BUY":
                 if risk_reason == "daily_loss":
                     raise HTTPException(400, "Daily realized-loss limit reached. New paper entries are locked until the UTC day resets.")
@@ -678,7 +719,7 @@ def market_detail(symbol: str, interval: str = "5m"):
     if interval not in {"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise HTTPException(400, "Unsupported candle interval.")
     pair = symbol + "USDT"
-    url = "https://data-api.binance.vision/api/v3/ticker/24hr?" + __import__("urllib.parse", fromlist=["urlencode"]).urlencode({"symbol": pair})
+    url = "https://data-api.binance.vision/api/v3/ticker/24hr?" + urlencode({"symbol": pair})
     try:
         req = Request(url, headers={"Accept": "application/json", "User-Agent": "multichain-paper-agent/1.0"})
         with urlopen(req, timeout=8) as response:
@@ -713,7 +754,8 @@ def intelligence_candidates(limit: int = 8):
     """Rank a bounded set of liquid USDT pairs using live ticker data and completed-candle signals."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    limit = max(1, min(int(limit), 12))
+    if not 1 <= limit <= 12:
+        raise HTTPException(400, "limit must be between 1 and 12.")
     try:
         scan = universe_provider.scan(limit=100, min_quote_volume=500_000)
     except RuntimeError as exc:
@@ -763,6 +805,10 @@ def intelligence_candidates(limit: int = 8):
 @app.get("/api/intelligence/universe")
 def intelligence_universe(limit: int = 30, min_quote_volume_usdt: float = 2_000_000):
     """Read-only ranked public Binance USDT spot universe."""
+    if not 1 <= limit <= 100:
+        raise HTTPException(400, "limit must be between 1 and 100.")
+    if not math.isfinite(min_quote_volume_usdt) or min_quote_volume_usdt < 0:
+        raise HTTPException(400, "min_quote_volume_usdt must be finite and non-negative.")
     try:
         return universe_provider.scan(limit=limit, min_quote_volume=min_quote_volume_usdt)
     except RuntimeError as exc:
@@ -772,6 +818,8 @@ def intelligence_universe(limit: int = 30, min_quote_volume_usdt: float = 2_000_
 @app.get("/api/intelligence/news")
 def intelligence_news(limit: int = 40):
     """Read-only public RSS headlines with transparent weak sentiment labels."""
+    if not 1 <= limit <= 100:
+        raise HTTPException(400, "limit must be between 1 and 100.")
     return news_provider.fetch(limit=limit)
 
 
