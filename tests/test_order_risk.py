@@ -15,6 +15,21 @@ class OrderRiskTests(unittest.TestCase):
         main.DB_PATH = self.original_db
         self.tmp.cleanup()
 
+    def test_app_startup_and_shutdown_manage_scheduler(self):
+        main.startup()
+        self.assertIsNotNone(main._auto_scheduler)
+        self.assertTrue(main._auto_scheduler.running)
+        main.shutdown()
+        self.assertFalse(main._auto_scheduler.running)
+
+    def test_missing_live_quote_blocks_order(self):
+        main.set_setting("market_data_mode", "live_public")
+        with patch.object(main.live_provider, "get_prices", return_value={}):
+            with self.assertRaises(HTTPException) as error:
+                main.order(main.Order(symbol="SOL", side="BUY", amount=100))
+        self.assertEqual(error.exception.status_code, 503)
+        self.assertIn("fresh price", error.exception.detail.lower())
+
     def test_ai_status_never_exposes_api_key(self):
         import os
         with patch.dict(os.environ, {"OPENAI_API_KEY": "not-a-real-secret"}, clear=False):
