@@ -6,13 +6,14 @@ from contextlib import contextmanager
 from typing import Optional
 from threading import Lock, RLock
 from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 except ImportError:
     pass
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from app.market_data import CoinGeckoFreeProvider, COINGECKO_IDS
 from app.intelligence import TrendingUniverseProvider, CryptoNewsProvider
@@ -25,7 +26,18 @@ from app.auto_scheduler import PaperAutoScheduler
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT.parent / "paper_agent.db"
-app = FastAPI(title="Multi-Chain Paper Trading Agent", version="0.2.0")
+app = FastAPI(title="Multi-Chain Paper Trading Agent", version="0.3.0")
+
+# JSON API responses are explicitly non-cacheable by browsers and intermediary proxies.
+@app.middleware("http")
+async def set_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
 live_provider = CoinGeckoFreeProvider()
 universe_provider = TrendingUniverseProvider()
 news_provider = CryptoNewsProvider()
@@ -250,6 +262,8 @@ def get_market():
 def get_live_market(symbols: str = "SOL,ETH,ARB,BNB,JUP,AERO,STRK,PENGU,TIA,HYPE,TRUMP,USDC"):
     """Fetch free public prices. This endpoint does not feed orders or replace demo prices."""
     requested = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
+    if not requested:
+        raise HTTPException(400, "Provide at least one supported symbol.")
     data = live_provider.get_prices(requested)
     return {"mode":"LIVE_PUBLIC_DATA_READ_ONLY", "new_entries_allowed": all(x.status == "fresh" for x in data.values()) and bool(data),
             "items":[{"symbol":x.symbol,"price_inr":x.price,"currency":"INR","provider":x.provider,"fetched_at":x.fetched_at,"status":x.status,"error":x.error} for x in data.values()]}
@@ -312,9 +326,19 @@ def resume():
     return {"paused":False}
 @app.post("/api/reset")
 def reset():
-    with connect() as c:
-        c.execute("DELETE FROM trades"); c.execute("DELETE FROM audit"); c.execute("DELETE FROM cash_adjustments"); c.commit()
-    set_setting("paused",False)
+    # A reset is intentionally destructive and can only clear simulation tables.
+    # The settings table and the external SQLite backup are never deleted here.
+    with _order_lock:
+        set_setting("auto_monitor_enabled", False)
+        set_setting("paused", True)
+        if _auto_scheduler is not None:
+            # The periodic loop observes the disabled setting before the next tick.
+            pass
+        with connect() as c:
+            c.execute("DELETE FROM trades")
+            c.execute("DELETE FROM cash_adjustments")
+            c.commit()
+        set_setting("paused", False)
     set_setting("high_water_equity",float(settings()["virtual_cash"]))
     set_setting("risk_lockout_reason", "")
     set_setting("risk_lockout_date", "")
@@ -678,7 +702,7 @@ def market_detail(symbol: str, interval: str = "5m"):
     if interval not in {"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise HTTPException(400, "Unsupported candle interval.")
     pair = symbol + "USDT"
-    url = "https://data-api.binance.vision/api/v3/ticker/24hr?" + __import__("urllib.parse", fromlist=["urlencode"]).urlencode({"symbol": pair})
+    url = "https://data-api.binance.vision/api/v3/ticker/24hr?" + urlencode({"symbol": pair})
     try:
         req = Request(url, headers={"Accept": "application/json", "User-Agent": "multichain-paper-agent/1.0"})
         with urlopen(req, timeout=8) as response:
@@ -713,7 +737,8 @@ def intelligence_candidates(limit: int = 8):
     """Rank a bounded set of liquid USDT pairs using live ticker data and completed-candle signals."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    limit = max(1, min(int(limit), 12))
+    if not 1 <= limit <= 12:
+        raise HTTPException(400, "limit must be between 1 and 12.")
     try:
         scan = universe_provider.scan(limit=100, min_quote_volume=500_000)
     except RuntimeError as exc:
@@ -763,6 +788,10 @@ def intelligence_candidates(limit: int = 8):
 @app.get("/api/intelligence/universe")
 def intelligence_universe(limit: int = 30, min_quote_volume_usdt: float = 2_000_000):
     """Read-only ranked public Binance USDT spot universe."""
+    if not 1 <= limit <= 100:
+        raise HTTPException(400, "limit must be between 1 and 100.")
+    if not math.isfinite(min_quote_volume_usdt) or min_quote_volume_usdt < 0:
+        raise HTTPException(400, "min_quote_volume_usdt must be finite and non-negative.")
     try:
         return universe_provider.scan(limit=limit, min_quote_volume=min_quote_volume_usdt)
     except RuntimeError as exc:
@@ -772,6 +801,8 @@ def intelligence_universe(limit: int = 30, min_quote_volume_usdt: float = 2_000_
 @app.get("/api/intelligence/news")
 def intelligence_news(limit: int = 40):
     """Read-only public RSS headlines with transparent weak sentiment labels."""
+    if not 1 <= limit <= 100:
+        raise HTTPException(400, "limit must be between 1 and 100.")
     return news_provider.fetch(limit=limit)
 
 
