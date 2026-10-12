@@ -42,7 +42,7 @@ DEFAULTS = {
     "max_trade_pct": 10.0, "daily_loss_limit_pct": 3.0,
     "max_positions": 4, "paused": False, "auto_monitor_enabled": False,
     "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0,
-    "market_data_mode": "synthetic"
+    "high_water_equity": 100000.0, "market_data_mode": "synthetic"
 }
 _order_lock = RLock()
 _auto_cycle_lock = Lock()
@@ -166,8 +166,13 @@ def portfolio():
     fees=sum(t["fee"] for t in trades); slip=sum(t["slippage_cost"] for t in trades)
     equity=cash+exposure
     total_topups=sum(a["amount"] for a in adjustments)
+    high_water = max(float(s.get("high_water_equity", 0) or 0), float(equity))
+    if high_water > float(s.get("high_water_equity", 0) or 0):
+        set_setting("high_water_equity", high_water)
+    drawdown_pct = max(0.0, (high_water - equity) / high_water * 100) if high_water > 0 else 0.0
     return {"virtual_cash":round(cash,2),"equity":round(equity,2),"starting_virtual_cash":s["virtual_cash"],
-            "virtual_topups":round(total_topups,2),
+            "virtual_topups":round(total_topups,2),"high_water_equity":round(high_water,2),
+            "drawdown_pct":round(drawdown_pct,4),
             "exposure":round(exposure,2),"realized_pnl":round(realized,2),"unrealized_pnl":round(unreal,2),
             "net_pnl":round(equity-s["virtual_cash"]-total_topups,2),"fees_paid":round(fees,2),"slippage_cost":round(slip,2),
             "positions":pos,"position_count":len(pos),
@@ -255,8 +260,13 @@ def get_settings(): return settings()
 @app.patch("/api/settings")
 def update_settings(update: SettingsUpdate):
     data=update.model_dump(exclude_none=True)
+    current = settings()
     if "market_data_mode" in data and data["market_data_mode"] not in ("synthetic", "live_public"):
         raise HTTPException(400, "market_data_mode must be 'synthetic' or 'live_public'.")
+    effective_mode = data.get("market_data_mode", current.get("market_data_mode", "synthetic"))
+    effective_auto = data.get("auto_monitor_enabled", current.get("auto_monitor_enabled", False))
+    if effective_auto and effective_mode != "live_public":
+        raise HTTPException(400, "Automated paper trading requires Public market prices mode; synthetic demo prices cannot be used for unattended cycles.")
     if data.get("market_data_mode") == "live_public":
         live_prices = live_provider.get_prices([a["symbol"] for a in ASSETS if a["symbol"] != "USDC"])
         required_symbols = ["SOL", "ETH", "ARB", "BNB"]
@@ -280,7 +290,9 @@ def resume():
 def reset():
     with connect() as c:
         c.execute("DELETE FROM trades"); c.execute("DELETE FROM audit"); c.execute("DELETE FROM cash_adjustments"); c.commit()
-    set_setting("paused",False); audit("SIMULATION_RESET",{"message":"Trade history cleared; virtual cash reset"})
+    set_setting("paused",False)
+    set_setting("high_water_equity",float(settings()["virtual_cash"]))
+    audit("SIMULATION_RESET",{"message":"Trade history cleared; virtual cash reset"})
     return {"ok":True}
 @app.get("/api/portfolio")
 def get_portfolio(): return portfolio()
@@ -339,8 +351,8 @@ def order(o: Order):
         p = portfolio()
         if not p.get("valuation_complete", True):
             raise HTTPException(503, "Portfolio has positions without fresh quotes; new paper orders are blocked until valuation recovers.")
-        initial_equity = float(s["virtual_cash"]) + float(p.get("virtual_topups", 0))
-        drawdown_pct = max(0.0, (initial_equity - float(p["equity"])) / initial_equity * 100) if initial_equity > 0 else 0.0
+        peak_equity = float(p.get("high_water_equity", s.get("virtual_cash", 0)))
+        drawdown_pct = float(p.get("drawdown_pct", 0))
         drawdown_limit = float(s.get("max_drawdown_pct", DEFAULTS["max_drawdown_pct"]))
         if drawdown_pct >= drawdown_limit:
             set_setting("paused", True)
@@ -471,6 +483,8 @@ def auto_trade_run(request: AutoMonitorEvaluation):
             raise HTTPException(400, "Automated paper trading is disabled. Enable it in settings first.")
         if s.get("paused", False):
             raise HTTPException(400, "Paper trading is paused.")
+        if s.get("market_data_mode", "synthetic") != "live_public":
+            raise HTTPException(400, "Automated paper trading requires Public market prices mode.")
         symbols = list(dict.fromkeys(x.strip().upper() for x in request.symbols if x.strip()))[:30]
         monitor = _build_signal_monitor()
         result = monitor.evaluate(symbols)
