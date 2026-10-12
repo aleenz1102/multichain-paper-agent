@@ -264,9 +264,21 @@ def get_live_market(symbols: str = "SOL,ETH,ARB,BNB,JUP,AERO,STRK,PENGU,TIA,HYPE
     requested = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
     if not requested:
         raise HTTPException(400, "Provide at least one supported symbol.")
-    data = live_provider.get_prices(requested)
-    return {"mode":"LIVE_PUBLIC_DATA_READ_ONLY", "new_entries_allowed": all(x.status == "fresh" for x in data.values()) and bool(data),
-            "items":[{"symbol":x.symbol,"price_inr":x.price,"currency":"INR","provider":x.provider,"fetched_at":x.fetched_at,"status":x.status,"error":x.error} for x in data.values()]}
+    try:
+        data = live_provider.get_prices(requested)
+    except Exception as exc:
+        audit("LIVE_MARKET_FETCH_FAILED", {"error_type": type(exc).__name__, "requested_count": len(requested)})
+        raise HTTPException(503, "Public market prices are temporarily unavailable.") from exc
+    items = [
+        {"symbol": x.symbol, "price_inr": x.price, "currency": "INR",
+         "provider": x.provider, "fetched_at": x.fetched_at, "status": x.status, "error": x.error}
+        for x in data.values()
+    ]
+    return {
+        "mode": "LIVE_PUBLIC_DATA_READ_ONLY",
+        "new_entries_allowed": bool(items) and all(x["status"] == "fresh" and x["price_inr"] is not None for x in items),
+        "items": items,
+    }
 
 class CandleInput(BaseModel):
     candles: list[dict] = Field(min_length=2, max_length=5000)
