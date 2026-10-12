@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from app.market_data import CoinGeckoFreeProvider, COINGECKO_IDS
 from app.intelligence import TrendingUniverseProvider, CryptoNewsProvider
 from app.research import walk_forward_report
-from app.strategy import combined_signal
+from app.strategy import combined_signal, build_trade_plan
 from app.backtest import BacktestConfig, run_backtest
 from app.auto_monitor import MonitorConfig, PaperSignalMonitor
 from app.candle_data import BinancePublicCandleProvider
@@ -690,7 +690,7 @@ def market_detail(symbol: str, interval: str = "5m"):
                 "trades_24h": int(ticker["count"]),
                 "high_24h": float(ticker["highPrice"]), "low_24h": float(ticker["lowPrice"]),
             },
-            "candles": candles, "signal": signal,
+            "candles": candles, "signal": signal, "trade_plan": build_trade_plan(candles, signal),
             "warning": "Signal is rule-based research, not a profitability guarantee. No order is submitted.",
         }
     except HTTPException:
@@ -730,7 +730,7 @@ def intelligence_candidates(limit: int = 8):
             "signal_score": signal.get("score", 0), "candidate_score": round(combined_rank, 4),
             "regime": signal.get("regime", "unknown"), "eligible_candidate": eligible,
             "reason": signal.get("reason", "No signal reason available."),
-            "candles_completed": len(candles),
+            "candles_completed": len(candles), "trade_plan": build_trade_plan(candles, signal),
         }
 
     with ThreadPoolExecutor(max_workers=6) as pool:
