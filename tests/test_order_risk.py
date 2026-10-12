@@ -15,6 +15,22 @@ class OrderRiskTests(unittest.TestCase):
         main.DB_PATH = self.original_db
         self.tmp.cleanup()
 
+    def test_ai_status_never_exposes_api_key(self):
+        import os
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "not-a-real-secret"}, clear=False):
+            status = main.ai_status()
+        self.assertTrue(status["enabled"])
+        self.assertFalse(status["key_exposed"])
+        self.assertFalse(status["can_execute_orders"])
+        self.assertNotIn("not-a-real-secret", str(status))
+
+    def test_ai_analysis_requires_server_environment_key(self):
+        import os
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(HTTPException) as error:
+                main.ai_analyze(main.AIAnalysisInput())
+        self.assertEqual(error.exception.status_code, 503)
+
     def test_defaults_include_conservative_portfolio_caps(self):
         s = main.settings()
         self.assertEqual(s["max_drawdown_pct"], 10.0)
