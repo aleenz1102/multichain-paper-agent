@@ -662,6 +662,28 @@ def intelligence_news(limit: int = 40):
     return news_provider.fetch(limit=limit)
 
 
+@app.post("/api/research/walk-forward/{symbol}")
+def research_symbol_walk_forward(symbol: str):
+    """Fetch recent completed public candles and run a cost-aware chronological report."""
+    symbol = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
+        raise HTTPException(400, "Invalid symbol.")
+    try:
+        candles = _candle_provider.get_candles(symbol)
+        if len(candles) < 120:
+            raise ValueError("At least 120 completed candles are required.")
+        report = walk_forward_report(candles)
+        report["symbol"] = symbol
+        report["data_source"] = "Binance public completed spot candles"
+        report["candle_count"] = len(candles)
+        return report
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, f"Backtest could not run: {exc}") from exc
+    except Exception as exc:
+        audit("WALK_FORWARD_FAILED", {"symbol": symbol, "error_type": type(exc).__name__})
+        raise HTTPException(503, "Public candle history unavailable; no backtest result was produced.") from exc
+
+
 @app.post("/api/research/walk-forward")
 def research_walk_forward(data: BacktestInput):
     """Chronological train/validation/test report including simulated trading costs."""
