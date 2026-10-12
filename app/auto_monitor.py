@@ -63,8 +63,11 @@ class PaperSignalMonitor:
                     continue
 
                 timestamp = datetime.now(timezone.utc).isoformat()
+                candle_timestamp = None
                 try:
                     candles = self.candle_provider(symbol)
+                    if isinstance(candles, list) and candles and isinstance(candles[-1], dict):
+                        candle_timestamp = candles[-1].get("timestamp")
                     if not isinstance(candles, list) or len(candles) < 30:
                         result = {
                             "symbol": symbol,
@@ -110,6 +113,7 @@ class PaperSignalMonitor:
 
                 event = {
                     "timestamp": timestamp,
+                    "candle_timestamp": candle_timestamp,
                     "mode": "AUDIT_ONLY",
                     "orders_submitted": False,
                     **result,

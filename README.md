@@ -63,9 +63,9 @@ Open http://localhost:8000
 - Do not add private keys or exchange secrets to this repository.
 - Do not interpret simulated backtests or demo signals as investment advice.
 
-## Automated paper mode (feature branch)
+## Automated paper mode
 
-The neon dashboard and opt-in scheduler are being developed on `feat/neon-paper-agent-dashboard` and tracked in [PR #3](https://github.com/aleenz1102/multichain-paper-agent/pull/3). These changes are not merged into `main` yet.
+The current `main` branch includes the neon dashboard, public USDT market scanner, selected-market candles, research endpoints, and an opt-in paper scheduler. The scheduler runs a cycle immediately after automation is enabled or resumed, then on a 60-second cadence. Dashboard stats refresh every second and selected-market ticker/candle updates use the public Binance WebSocket stream; REST candle history refreshes periodically.
 
 ### Windows local run
 
@@ -87,7 +87,7 @@ Do not overwrite your existing `paper_agent.db` when checking out a development 
 
 ### Automated simulation controls
 
-- Automated paper mode is **disabled by default**. Enable it explicitly from the dashboard; then the in-process scheduler evaluates the supported crypto symbols every five minutes while the engine is not paused.
+- Automated paper mode is **disabled by default**. When enabled and unpaused, the in-process scheduler runs immediately, then checks for another cycle every 60 seconds. Cycles are deduplicated by completed-candle timestamp, so a one-second dashboard refresh cannot trigger duplicate entries.
 - Keep Uvicorn at one worker while using the in-process scheduler. Multiple workers/processes can each start their own scheduler; this build is not a distributed scheduler.
 - Daily realized-loss, per-entry size, max concurrent positions, max portfolio exposure, and portfolio drawdown checks are enforced in the paper order path. A pause/kill switch blocks orders. Public quotes or portfolio valuations that are stale/missing are blocked rather than silently replaced by demo prices.
 - The default `synthetic` market mode is for UI and strategy experimentation only. `live_public` mode uses unauthenticated public pricing for the supported watchlist, but the order engine still only creates simulated fills.
@@ -115,9 +115,9 @@ $env:OPENAI_MODEL = "gpt-4o-mini"
 This remains a paper-trading research project, not a certified production trading service. Before relying on it for unattended testing, run the full tests and Windows smoke test locally, review the provider's API terms/rate limits, and monitor the app during a long paper session. No profitability is implied. Live trading, exchange credentials, wallets, and real order execution are deliberately out of scope.
 
 
-## Autonomous paper research additions (feature branch)
+## Autonomous paper research features
 
-The development branch `feat/autonomous-paper-trader` builds on PR #3 and adds:
+The current `main` branch includes:
 
 - `GET /api/intelligence/universe`: ranks Binance public USDT spot tickers by 24-hour liquidity, momentum, trading activity, and an extreme-range penalty. It excludes stablecoin quotes and common leveraged-token suffixes. The score is a ranking heuristic, not a probability of profit.
 - `GET /api/intelligence/news`: reads public CoinDesk and Cointelegraph RSS feeds with a five-minute cache and an explainable keyword sentiment score. RSS availability and source terms can be noisy; headlines are not a reliable prediction model.

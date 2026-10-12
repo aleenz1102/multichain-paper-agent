@@ -65,7 +65,7 @@ DEFAULTS = {
     "max_positions": 4, "paused": False, "auto_monitor_enabled": False,
     "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0,
     "high_water_equity": 100000.0, "market_data_mode": "synthetic",
-    "risk_lockout_reason": "", "risk_lockout_date": ""
+    "risk_lockout_reason": "", "risk_lockout_date": "", "last_auto_candle_by_symbol": {}
 }
 _order_lock = RLock()
 _auto_cycle_lock = Lock()
@@ -232,7 +232,7 @@ def startup():
         paused=lambda: bool(settings().get("paused", False)),
         run_cycle=lambda: auto_trade_run(AutoMonitorEvaluation()),
         audit=audit,
-        interval_seconds=300,
+        interval_seconds=60,
     )
     _auto_scheduler.start()
 
@@ -532,13 +532,16 @@ def auto_monitor_status():
         "mode": "PAPER_AUTO_TRADE" if s.get("auto_monitor_enabled", False) else "AUDIT_ONLY",
         "orders_submitted": False,
         "scheduler_running": bool(_auto_scheduler and _auto_scheduler.running),
-        "interval_seconds": _auto_scheduler.interval_seconds if _auto_scheduler else 300,
+        "interval_seconds": _auto_scheduler.interval_seconds if _auto_scheduler else 60,
+        "cycles_completed": _auto_scheduler.cycles_completed if _auto_scheduler else 0,
+        "cycles_failed": _auto_scheduler.cycles_failed if _auto_scheduler else 0,
+        "last_cycle_duration_seconds": _auto_scheduler.last_cycle_duration_seconds if _auto_scheduler else None,
         "last_cycle_at": _auto_scheduler.last_cycle_at if _auto_scheduler else None,
         "last_cycle_status": _auto_scheduler.last_cycle_status if _auto_scheduler else "not_started",
         "last_cycle_error": _auto_scheduler.last_cycle_error if _auto_scheduler else None,
         "candle_provider": "binance_public_klines",
         "message": (
-            "Scheduler is active; paper cycles run every five minutes while enabled and unpaused."
+            "Scheduler checks enable/pause state each second; paper cycles run immediately on enable/resume and then every 60 seconds while enabled and unpaused."
             if _auto_scheduler and _auto_scheduler.running and s.get("auto_monitor_enabled", False)
             else "Scheduler is idle unless automated paper trading is enabled; all execution remains simulated."
         ),
@@ -591,9 +594,30 @@ def auto_trade_run(request: AutoMonitorEvaluation):
         monitor = _build_signal_monitor()
         result = monitor.evaluate(symbols)
         executed = []
+        last_processed = dict(settings().get("last_auto_candle_by_symbol", {}) or {})
         for item in result.get("results", []):
             symbol = item.get("symbol", "")
             signal = item.get("signal", "HOLD").upper()
+            candle_timestamp = item.get("candle_timestamp")
+            if candle_timestamp:
+                previous_timestamp = str(last_processed.get(symbol, "") or "")
+                if previous_timestamp and str(candle_timestamp) <= previous_timestamp:
+                    executed.append({
+                        "symbol": symbol, "signal": signal, "status": "skipped_duplicate_candle",
+                        "reason": "This completed candle was already evaluated; duplicate paper entries are blocked.",
+                        "candle_timestamp": candle_timestamp,
+                    })
+                    continue
+                last_processed[symbol] = str(candle_timestamp)
+                # Persist deduplication in the existing settings table. No schema
+                # migration or reset of the existing paper ledger is required.
+                set_setting("last_auto_candle_by_symbol", last_processed)
+            else:
+                executed.append({
+                    "symbol": symbol, "signal": signal, "status": "blocked_missing_candle_timestamp",
+                    "reason": "No completed-candle timestamp; automated action withheld.",
+                })
+                continue
             if signal not in ("BUY", "SELL") or symbol not in {a["symbol"] for a in ASSETS}:
                 continue
             news_context = _news_veto(symbol)
@@ -710,6 +734,54 @@ def ai_analyze(request: AIAnalysisInput):
 
 
 
+_market_ticker_cache: dict[str, tuple[float, dict]] = {}
+_market_ticker_cache_lock = Lock()
+
+
+@app.get("/api/market/ticker/{symbol}")
+def market_ticker(symbol: str):
+    """Lightweight, cached public USDT ticker for one-second UI refreshes."""
+    symbol = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
+        raise HTTPException(400, "Invalid market symbol.")
+    now = time.monotonic()
+    with _market_ticker_cache_lock:
+        cached = _market_ticker_cache.get(symbol)
+        if cached and now - cached[0] < 0.8:
+            return dict(cached[1])
+        pair = symbol + "USDT"
+        url = "https://data-api.binance.vision/api/v3/ticker/24hr?" + urlencode({"symbol": pair})
+        try:
+            req = Request(url, headers={"Accept": "application/json", "User-Agent": "multichain-paper-agent/1.0"})
+            with urlopen(req, timeout=5) as response:
+                ticker = json.loads(response.read().decode("utf-8"))
+            if not isinstance(ticker, dict) or ticker.get("symbol") != pair:
+                raise ValueError("Ticker response did not match requested USDT pair.")
+            price = float(ticker["lastPrice"])
+            change = float(ticker["priceChangePercent"])
+            volume = float(ticker["quoteVolume"])
+            high = float(ticker["highPrice"])
+            low = float(ticker["lowPrice"])
+            trades = int(ticker["count"])
+            if not all(math.isfinite(v) for v in (price, change, volume, high, low)) or min(price, volume, high, low) < 0 or price == 0:
+                raise ValueError("Ticker contains invalid numeric values.")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(503, "Public USDT ticker temporarily unavailable.") from exc
+        result = {
+            "symbol": symbol, "pair": pair, "provider": "Binance public spot REST",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "ticker": {
+                "price": price, "change_24h_pct": change,
+                "quote_volume_24h_usdt": volume, "trades_24h": trades,
+                "high_24h": high, "low_24h": low,
+            },
+        }
+        _market_ticker_cache[symbol] = (time.monotonic(), result)
+        return dict(result)
+
+
 @app.get("/api/market/detail/{symbol}")
 def market_detail(symbol: str, interval: str = "5m"):
     """Read-only live ticker, completed candles and explainable signal for a USDT spot pair."""
@@ -728,6 +800,12 @@ def market_detail(symbol: str, interval: str = "5m"):
             raise ValueError("Ticker response did not match requested USDT pair.")
         candle_provider = _candle_provider if interval == _candle_provider.interval else BinancePublicCandleProvider(interval=interval, limit=150)
         candles = candle_provider.get_candles(symbol)
+        try:
+            forming_candle = candle_provider.get_forming_candle(symbol)
+        except Exception:
+            # Keep validated completed history available even if the optional
+            # in-progress chart candle cannot be fetched.
+            forming_candle = None
         signal = combined_signal(candles)
         return {
             "symbol": symbol, "pair": pair, "provider": "Binance public spot market data",
@@ -739,7 +817,7 @@ def market_detail(symbol: str, interval: str = "5m"):
                 "trades_24h": int(ticker["count"]),
                 "high_24h": float(ticker["highPrice"]), "low_24h": float(ticker["lowPrice"]),
             },
-            "candles": candles, "signal": signal, "trade_plan": build_trade_plan(candles, signal),
+            "candles": candles, "forming_candle": forming_candle, "signal": signal, "trade_plan": build_trade_plan(candles, signal),
             "warning": "Signal is rule-based research, not a profitability guarantee. No order is submitted.",
         }
     except HTTPException:
