@@ -231,7 +231,15 @@ def shutdown():
 @app.get("/", response_class=HTMLResponse)
 def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 @app.get("/api/health")
-def health(): return {"ok":True,"mode":"PAPER_ONLY","data":"SYNTHETIC DEMO","live_trading":False}
+def health():
+    mode = settings().get("market_data_mode", "synthetic")
+    return {
+        "ok": True,
+        "mode": "PAPER_ONLY",
+        "data": "LIVE PUBLIC DATA CONFIGURED" if mode == "live_public" else "SYNTHETIC DEMO",
+        "market_data_mode": mode,
+        "live_trading": False,
+    }
 @app.get("/api/market")
 def get_market():
     mode = settings().get("market_data_mode", "synthetic")
