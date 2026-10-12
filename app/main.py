@@ -9,7 +9,9 @@ from urllib.request import Request, urlopen
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from app.market_data import CoinGeckoFreeProvider
+from app.market_data import CoinGeckoFreeProvider, COINGECKO_IDS
+from app.intelligence import TrendingUniverseProvider, CryptoNewsProvider
+from app.research import walk_forward_report
 from app.strategy import combined_signal
 from app.backtest import BacktestConfig, run_backtest
 from app.auto_monitor import MonitorConfig, PaperSignalMonitor
@@ -20,6 +22,8 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT.parent / "paper_agent.db"
 app = FastAPI(title="Multi-Chain Paper Trading Agent", version="0.2.0")
 live_provider = CoinGeckoFreeProvider()
+universe_provider = TrendingUniverseProvider()
+news_provider = CryptoNewsProvider()
 
 # Synthetic demo universe. No live provider or signing functionality is included.
 ASSETS = [
@@ -488,7 +492,8 @@ def auto_monitor_status():
 
 
 class AutoMonitorEvaluation(BaseModel):
-    symbols: list[str] = Field(default=["SOL", "ETH", "ARB", "BNB"], min_length=1, max_length=30)
+    symbols: list[str] = Field(default_factory=list, max_length=30)
+    auto_select_trending: bool = True
 
 
 @app.post("/api/auto-monitor/evaluate")
@@ -518,6 +523,13 @@ def auto_trade_run(request: AutoMonitorEvaluation):
         if s.get("market_data_mode", "synthetic") != "live_public":
             raise HTTPException(400, "Automated paper trading requires Public market prices mode.")
         symbols = list(dict.fromkeys(x.strip().upper() for x in request.symbols if x.strip()))[:30]
+        if request.auto_select_trending or not symbols:
+            try:
+                scan = universe_provider.scan(limit=100, min_quote_volume=2_000_000)
+                supported = {a["symbol"] for a in ASSETS if a["symbol"] in COINGECKO_IDS and a["symbol"] != "USDC"}
+                symbols = [x["symbol"] for x in scan["items"] if x["symbol"] in supported][:8]
+            except RuntimeError as exc:
+                raise HTTPException(503, "Trending market scan unavailable; no paper cycle was run.") from exc
         monitor = _build_signal_monitor()
         result = monitor.evaluate(symbols)
         executed = []
@@ -525,6 +537,11 @@ def auto_trade_run(request: AutoMonitorEvaluation):
             symbol = item.get("symbol", "")
             signal = item.get("signal", "HOLD").upper()
             if signal not in ("BUY", "SELL") or symbol not in {a["symbol"] for a in ASSETS}:
+                continue
+            news_context = _news_veto(symbol)
+            if signal == "BUY" and news_context.get("veto_buy"):
+                executed.append({"symbol": symbol, "signal": signal, "status": "blocked_by_news",
+                                 "reason": news_context["reason"], "news": news_context})
                 continue
             p = portfolio()
             if signal == "BUY":
@@ -628,6 +645,55 @@ def ai_analyze(request: AIAnalysisInput):
     audit("AI_ANALYSIS_COMPLETED", {"provider": "openai_compatible", "model": body["model"], "symbols": selected, "orders_submitted": False})
     return {"analysis": analysis, "provider": "openai_compatible", "model": body["model"],
             "advisory_only": True, "live_trading": False, "orders_submitted": False}
+
+
+@app.get("/api/intelligence/universe")
+def intelligence_universe(limit: int = 30, min_quote_volume_usdt: float = 2_000_000):
+    """Read-only ranked public Binance USDT spot universe."""
+    try:
+        return universe_provider.scan(limit=limit, min_quote_volume=min_quote_volume_usdt)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/api/intelligence/news")
+def intelligence_news(limit: int = 40):
+    """Read-only public RSS headlines with transparent weak sentiment labels."""
+    return news_provider.fetch(limit=limit)
+
+
+@app.post("/api/research/walk-forward")
+def research_walk_forward(data: BacktestInput):
+    """Chronological train/validation/test report including simulated trading costs."""
+    try:
+        return walk_forward_report(
+            data.candles, initial_cash=data.initial_cash, fee_bps=data.fee_bps,
+            slippage_bps=data.slippage_bps, position_fraction=data.position_fraction,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, f"Walk-forward evaluation could not run: {exc}") from exc
+
+
+def _news_veto(symbol: str) -> dict:
+    """Negative news may veto an entry; positive headlines never force a BUY."""
+    assets = {a["symbol"]: a for a in ASSETS}
+    asset = assets.get(symbol, {"name": symbol})
+    terms = {symbol.lower(), str(asset.get("name", symbol)).lower()}
+    matched = []
+    for article in news_provider.fetch(limit=60).get("items", []):
+        text = (article.get("title", "") + " " + article.get("summary", "")).lower()
+        if any(re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", text) for term in terms if len(term) >= 3):
+            matched.append(article)
+    if not matched:
+        return {"veto_buy": False, "matched_articles": 0, "sentiment": "unknown",
+                "reason": "No sufficiently direct recent news match; no sentiment assumption applied."}
+    scores = [float(x.get("sentiment", {}).get("score", 0)) for x in matched]
+    confidence = max((float(x.get("sentiment", {}).get("confidence", 0)) for x in matched), default=0)
+    score = sum(scores) / len(scores)
+    veto = score < -0.15 and confidence >= 0.5
+    return {"veto_buy": veto, "matched_articles": len(matched), "sentiment_score": round(score, 3),
+            "confidence": confidence, "sentiment": "negative" if score < -0.15 else "positive" if score > 0.15 else "neutral",
+            "reason": "Negative recent headlines veto new BUY entries." if veto else "News is advisory; no negative-news veto triggered."}
 
 
 @app.get("/api/metrics")
