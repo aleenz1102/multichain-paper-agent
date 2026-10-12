@@ -3,7 +3,7 @@ import json, math, sqlite3, time
 from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import Optional
-from threading import RLock
+from threading import Lock, RLock
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -44,6 +44,7 @@ DEFAULTS = {
     "market_data_mode": "synthetic"
 }
 _order_lock = RLock()
+_auto_cycle_lock = Lock()
 def now_iso(): return datetime.now(timezone.utc).isoformat()
 def connect():
     c = sqlite3.connect(DB_PATH)
@@ -243,8 +244,9 @@ def update_settings(update: SettingsUpdate):
         raise HTTPException(400, "market_data_mode must be 'synthetic' or 'live_public'.")
     if data.get("market_data_mode") == "live_public":
         live_prices = live_provider.get_prices([a["symbol"] for a in ASSETS if a["symbol"] != "USDC"])
-        if not live_prices or any(p.price is None or p.status != "fresh" for p in live_prices.values()):
-            raise HTTPException(503, "Public market data is incomplete or stale; provider mode was not changed.")
+        required_symbols = ["SOL", "ETH", "ARB", "BNB"]
+        if any(symbol not in live_prices or live_prices[symbol].price is None or live_prices[symbol].status != "fresh" for symbol in required_symbols):
+            raise HTTPException(503, "Required strategy market data is incomplete or stale; provider mode was not changed.")
     for k,v in data.items():
         if k=="virtual_cash" and rows("SELECT id FROM trades LIMIT 1"):
             raise HTTPException(400,"Virtual starting cash cannot be changed after the first paper trade.")
@@ -334,6 +336,10 @@ def order(o: Order):
         if o.symbol not in mk:
             raise HTTPException(400, "Unknown asset.")
         asset = mk[o.symbol]
+        if asset.get("price") is None or not isinstance(asset.get("price"), (int, float)) or asset["price"] <= 0:
+            raise HTTPException(503, "No fresh price is available for this asset; paper order rejected.")
+        if s.get("market_data_mode", "synthetic") == "live_public" and not str(asset.get("data_status", "")).startswith("LIVE PUBLIC"):
+            raise HTTPException(503, "Selected public price is stale or unavailable; paper order rejected.")
         if o.amount > p["equity"] * s["max_trade_pct"] / 100:
             raise HTTPException(400, f"Order exceeds max trade allocation ({s['max_trade_pct']}% of equity).")
 
@@ -440,39 +446,53 @@ def auto_monitor_evaluate(request: AutoMonitorEvaluation):
 @app.post("/api/auto-trade/run")
 def auto_trade_run(request: AutoMonitorEvaluation):
     """One bounded automated paper-trading cycle; never sends external orders."""
-    s = settings()
-    if not s.get("auto_monitor_enabled", False):
-        raise HTTPException(400, "Automated paper trading is disabled. Enable it in settings first.")
-    if s.get("paused", False):
-        raise HTTPException(400, "Paper trading is paused.")
-    symbols = list(dict.fromkeys(x.strip().upper() for x in request.symbols if x.strip()))[:30]
-    monitor = _build_signal_monitor()
-    result = monitor.evaluate(symbols)
-    executed = []
-    for item in result.get("results", []):
-        symbol = item.get("symbol", "")
-        signal = item.get("signal", "HOLD").upper()
-        if signal not in ("BUY", "SELL") or symbol not in {a["symbol"] for a in ASSETS}:
-            continue
-        p = portfolio()
-        if signal == "BUY":
-            amount = round(max(0.0, min(p["equity"] * s["max_trade_pct"] / 100, p["virtual_cash"])), 2)
-            if amount <= 0:
-                executed.append({"symbol": symbol, "signal": signal, "status": "skipped", "reason": "No virtual cash available."})
+    if not _auto_cycle_lock.acquire(blocking=False):
+        raise HTTPException(409, "An automated paper cycle is already in progress.")
+    try:
+        s = settings()
+        if not s.get("auto_monitor_enabled", False):
+            raise HTTPException(400, "Automated paper trading is disabled. Enable it in settings first.")
+        if s.get("paused", False):
+            raise HTTPException(400, "Paper trading is paused.")
+        symbols = list(dict.fromkeys(x.strip().upper() for x in request.symbols if x.strip()))[:30]
+        monitor = _build_signal_monitor()
+        result = monitor.evaluate(symbols)
+        executed = []
+        for item in result.get("results", []):
+            symbol = item.get("symbol", "")
+            signal = item.get("signal", "HOLD").upper()
+            if signal not in ("BUY", "SELL") or symbol not in {a["symbol"] for a in ASSETS}:
                 continue
-        else:
-            pos = next((p0 for p0 in p["positions"] if p0["symbol"] == symbol), None)
-            if not pos:
-                executed.append({"symbol": symbol, "signal": signal, "status": "skipped", "reason": "No open paper position."})
-                continue
-            amount = round(pos["market_value"], 2)
-        try:
-            fill = order(Order(symbol=symbol, side=signal, amount=max(amount, 0.01), sell_percent=100 if signal == "SELL" else None))
-            executed.append({"symbol": symbol, "signal": signal, "status": "paper_filled", "trade_id": fill["trade"]["id"]})
-        except HTTPException as exc:
-            executed.append({"symbol": symbol, "signal": signal, "status": "blocked_by_risk", "reason": str(exc.detail)})
-    audit("AUTO_PAPER_CYCLE_COMPLETED", {"symbols": symbols, "orders_submitted": False, "paper_fills": sum(x["status"] == "paper_filled" for x in executed), "results": executed})
-    return {"mode": "PAPER_ONLY", "live_trading": False, "orders_submitted": False, "evaluated": result.get("evaluated", 0), "results": result.get("results", []), "paper_actions": executed}
+            p = portfolio()
+            if signal == "BUY":
+                amount = round(max(0.0, min(p["equity"] * s["max_trade_pct"] / 100, p["virtual_cash"])), 2)
+                if amount <= 0:
+                    executed.append({"symbol": symbol, "signal": signal, "status": "skipped", "reason": "No virtual cash available."})
+                    continue
+            else:
+                pos = next((p0 for p0 in p["positions"] if p0["symbol"] == symbol), None)
+                if not pos:
+                    executed.append({"symbol": symbol, "signal": signal, "status": "skipped", "reason": "No open paper position."})
+                    continue
+                amount = round(pos["market_value"], 2)
+            try:
+                fill = order(Order(symbol=symbol, side=signal, amount=max(amount, 0.01), sell_percent=100 if signal == "SELL" else None))
+                executed.append({"symbol": symbol, "signal": signal, "status": "paper_filled", "trade_id": fill["trade"]["id"]})
+            except HTTPException as exc:
+                executed.append({"symbol": symbol, "signal": signal, "status": "blocked_by_risk", "reason": str(exc.detail)})
+        payload = {
+            "mode": "PAPER_ONLY", "live_trading": False, "orders_submitted": False,
+            "evaluated": result.get("evaluated", 0), "results": result.get("results", []),
+            "paper_actions": executed,
+        }
+        audit("AUTO_PAPER_CYCLE_COMPLETED", {
+            "symbols": symbols, "orders_submitted": False,
+            "paper_fills": sum(x["status"] == "paper_filled" for x in executed),
+            "results": executed,
+        })
+        return payload
+    finally:
+        _auto_cycle_lock.release()
 
 
 @app.get("/api/metrics")
