@@ -9,6 +9,7 @@
 <header><div class="brand"><div class="bot">◉</div><div><h1>MULTICHAIN PAPER AGENT</h1><div class="sub">RESEARCH · SIMULATE · ANALYZE · IMPROVE</div></div></div><div class="row"><span class="banner">● PAPER MODE · LIVE ORDERS DISABLED</span><span class="pill" id="feedstatus">DEMO FEED</span><span class="small" id="clock"></span></div></header>
 <main>
 <div class="row spread"><div class="row"><span class="pill">DASHBOARD</span><span class="pill">RISK-FIRST</span><span class="pill">CRYPTO · EXTENSIBLE</span></div><div class="row"><span class="small" id="engineStatus">Checking engine…</span><button class="danger" onclick="pauseEngine()">KILL SWITCH</button><button class="safe" onclick="resumeEngine()">RESUME PAPER</button></div></div>
+<section class="card" id="candidateCard"><div class="row spread"><div><h2>Today's ranked setups</h2><div class="small">Public ticker + completed-candle signals · not a profit prediction</div></div><span class="pill" id="candidateStatus">NOT SCANNED</span></div><div id="candidateRows" class="small" style="margin-top:10px">Click “Find today's setups” to evaluate liquid USDT pairs. Signals remain advisory until paper risk checks pass.</div></section>
 <section class="card" id="marketDetailCard">
  <div class="row spread"><div><h2 id="detailTitle">Market detail · select a USDT pair</h2><div class="small" id="detailMeta">Live public market data · no exchange keys required</div></div>
  <div class="row"><label class="small" for="detailInterval">Candles</label><select id="detailInterval" onchange="loadMarketDetail(selectedMarket)" style="background:#050a16;color:#edf6ff;border:1px solid #3c3155;border-radius:5px;padding:8px"><option value="1m">1 minute</option><option value="5m" selected>5 minutes</option><option value="15m">15 minutes</option><option value="1h">1 hour</option><option value="4h">4 hours</option><option value="1d">1 day</option></select></div></div>
@@ -28,7 +29,7 @@
 <div class="card" style="border-color:var(--green)"><div class="label">Risk status</div><div class="value positive" id="riskStatus">SAFE</div><div class="sub">Backend-enforced limits</div></div>
 </section>
 <section class="layout">
-<div class="card market-card"><div class="row spread"><h2>Live USDT market terminal</h2><span class="small" id="liveMarketMeta">Connecting to public market scanner…</span></div><div class="notice" style="margin:8px 0">LIVE MARKET DATA ≠ LIVE EXECUTION. Prices and 24-hour statistics come from Binance public spot ticker snapshots. All orders remain paper-simulated.</div><div class="tablewrap"><table><thead><tr><th>Asset / Pair</th><th>Price (USDT)</th><th>24h change</th><th>24h volume (USDT)</th><th>Trades</th><th>Trend score</th><th>Paper action</th></tr></thead><tbody id="market"><tr><td colspan="7">Loading live public market data…</td></tr></tbody></table></div><div class="small">Snapshot data refreshes periodically; this is not a tick-by-tick WebSocket stream. Assets unsupported by the paper engine are watch-only.</div></div>
+<div class="card market-card"><div class="row spread"><h2>Live USDT market terminal</h2><div class="row"><span class="small" id="liveMarketMeta">Connecting to public market scanner…</span><button class="safe" onclick="scanTodaysCandidates()">Find today\'s setups</button></div></div><div class="notice" style="margin:8px 0">LIVE MARKET DATA ≠ LIVE EXECUTION. Prices and 24-hour statistics come from Binance public spot ticker snapshots. All orders remain paper-simulated.</div><div class="tablewrap"><table><thead><tr><th>Asset / Pair</th><th>Price (USDT)</th><th>24h change</th><th>24h volume (USDT)</th><th>Trades</th><th>Trend score</th><th>Paper action</th></tr></thead><tbody id="market"><tr><td colspan="7">Loading live public market data…</td></tr></tbody></table></div><div class="small">Snapshot data refreshes periodically; this is not a tick-by-tick WebSocket stream. Assets unsupported by the paper engine are watch-only.</div></div>
 <aside class="side-stack">
 <div class="card"><h2>Strategy engine</h2><div class="row spread"><span class="small">Explainable signals</span><span class="pill">PAPER ONLY</span></div>
 <div class="strategy"><div><strong>Combined signal</strong><div class="small">Trend + momentum + regime filter</div></div><span class="pill">READY</span></div>
@@ -152,6 +153,64 @@ async function runBacktest(symbol){
    '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
    '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+'\\n'+d.warning;
  }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
+}
+async function scanTodaysCandidates(){
+ $('candidateStatus').textContent='SCANNING';$('candidateRows').textContent='Scanning liquid USDT pairs and evaluating completed candles…';
+ try{const d=await api('/api/intelligence/candidates?limit=8');$('candidateStatus').textContent=d.provider_status+' · '+d.evaluated+' evaluated';
+ $('candidateRows').innerHTML=(d.items||[]).map(x=>'<div class="strategy"><div><div class="row"><strong>'+esc(x.pair)+'</strong><span class="pill '+sig(x.signal)+'">'+esc(x.signal)+'</span><span class="pill">Rank '+num(x.candidate_score*100,1)+'</span></div><div class="small">
+function drawCandles(candles){
+ const svg=$('detailChart');if(!candles||!candles.length){svg.innerHTML='<text x="20" y="30">No candle data available.</text>';return}
+ const W=900,H=330,L=58,R=18,T=16,B=28,innerW=W-L-R,innerH=H-T-B;
+ const lo=Math.min(...candles.map(c=>c.low)),hi=Math.max(...candles.map(c=>c.high)),pad=(hi-lo)*.08||hi*.01,min=lo-pad,max=hi+pad;
+ const y=v=>T+(max-v)/(max-min)*innerH,step=innerW/candles.length,body=Math.max(2,Math.min(8,step*.62));
+ let out='';
+ for(let k=0;k<=4;k++){const v=min+(max-min)*k/4,yy=y(v);out+='<line class="gridline" x1="'+L+'" y1="'+yy+'" x2="'+(W-R)+'" y2="'+yy+'"/><text x="4" y="'+(yy+4)+'">'+num(v,6)+'</text>'}
+ candles.forEach((c,i)=>{const x=L+i*step+step/2,up=c.close>=c.open,cls=up?'up':'down',yo=y(c.open),yc=y(c.close),top=Math.min(yo,yc),height=Math.max(1,Math.abs(yc-yo));out+='<line class="wick '+cls+'" x1="'+x+'" y1="'+y(c.high)+'" x2="'+x+'" y2="'+y(c.low)+'"/><rect class="'+cls+'" x="'+(x-body/2)+'" y="'+top+'" width="'+body+'" height="'+height+'"/>'});
+ out+='<text x="'+L+'" y="'+(H-7)+'">'+new Date(candles[0].timestamp).toLocaleString()+'</text><text x="'+(W-R-145)+'" y="'+(H-7)+'">'+new Date(candles[candles.length-1].timestamp).toLocaleString()+'</text>';
+ svg.innerHTML=out;
+}
+async function loadMarketDetail(symbol){
+ if(!symbol)return;selectedMarket=String(symbol).toUpperCase();$('detailTitle').textContent=selectedMarket+'/USDT · Market detail';$('detailMeta').textContent='Loading live ticker and completed candles…';$('detailReason').textContent='Fetching market data…';
+ try{
+  const d=await api('/api/market/detail/'+encodeURIComponent(selectedMarket)+'?interval='+encodeURIComponent($('detailInterval').value));
+  $('detailMeta').textContent=d.pair+' · '+d.provider+' · updated '+new Date(d.fetched_at).toLocaleTimeString();
+  $('detailPrice').textContent='setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();loadMarketDetail('BTC');setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);
+</script></body></html>+num(d.ticker.price,8);$('detailChange').textContent=num(d.ticker.change_24h_pct,2)+'%';$('detailChange').className=d.ticker.change_24h_pct>=0?'positive':'negative';$('detailVolume').textContent='setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);
+</script></body></html>+num(d.ticker.quote_volume_24h_usdt,0);$('detailTrades').textContent=num(d.ticker.trades_24h,0);
+  drawCandles(d.candles);$('detailChartMeta').textContent=d.candles.length+' completed '+d.interval+' candles · last candle '+new Date(d.candles[d.candles.length-1].timestamp).toLocaleTimeString();
+  $('detailSignal').innerHTML='<span class="pill '+sig(d.signal.signal)+'">'+esc(d.signal.signal)+'</span> <span class="pill">Score '+num(d.signal.score,3)+'</span> <span class="pill">'+esc(d.signal.regime||'unknown')+'</span>';
+  $('detailReason').textContent=d.signal.reason||'No reason returned';$('detailComponents').textContent='Trend '+num(d.signal.components?.trend,2)+' · Momentum '+num(d.signal.components?.momentum,2)+' · Mean reversion '+num(d.signal.components?.mean_reversion,2);
+ }catch(e){$('detailMeta').textContent='Live data unavailable';$('detailReason').textContent=e.message;$('detailChart').innerHTML='<text x="20" y="30">Candles unavailable: '+esc(e.message)+'</text>';$('detailSignal').innerHTML='<span class="pill hold">HOLD · DATA UNAVAILABLE</span>';}
+}
+$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);
+</script></body></html>+num(x.price_usdt,8)+' · 24h '+num(x.change_24h_pct,2)+'% · volume 
+function drawCandles(candles){
+ const svg=$('detailChart');if(!candles||!candles.length){svg.innerHTML='<text x="20" y="30">No candle data available.</text>';return}
+ const W=900,H=330,L=58,R=18,T=16,B=28,innerW=W-L-R,innerH=H-T-B;
+ const lo=Math.min(...candles.map(c=>c.low)),hi=Math.max(...candles.map(c=>c.high)),pad=(hi-lo)*.08||hi*.01,min=lo-pad,max=hi+pad;
+ const y=v=>T+(max-v)/(max-min)*innerH,step=innerW/candles.length,body=Math.max(2,Math.min(8,step*.62));
+ let out='';
+ for(let k=0;k<=4;k++){const v=min+(max-min)*k/4,yy=y(v);out+='<line class="gridline" x1="'+L+'" y1="'+yy+'" x2="'+(W-R)+'" y2="'+yy+'"/><text x="4" y="'+(yy+4)+'">'+num(v,6)+'</text>'}
+ candles.forEach((c,i)=>{const x=L+i*step+step/2,up=c.close>=c.open,cls=up?'up':'down',yo=y(c.open),yc=y(c.close),top=Math.min(yo,yc),height=Math.max(1,Math.abs(yc-yo));out+='<line class="wick '+cls+'" x1="'+x+'" y1="'+y(c.high)+'" x2="'+x+'" y2="'+y(c.low)+'"/><rect class="'+cls+'" x="'+(x-body/2)+'" y="'+top+'" width="'+body+'" height="'+height+'"/>'});
+ out+='<text x="'+L+'" y="'+(H-7)+'">'+new Date(candles[0].timestamp).toLocaleString()+'</text><text x="'+(W-R-145)+'" y="'+(H-7)+'">'+new Date(candles[candles.length-1].timestamp).toLocaleString()+'</text>';
+ svg.innerHTML=out;
+}
+async function loadMarketDetail(symbol){
+ if(!symbol)return;selectedMarket=String(symbol).toUpperCase();$('detailTitle').textContent=selectedMarket+'/USDT · Market detail';$('detailMeta').textContent='Loading live ticker and completed candles…';$('detailReason').textContent='Fetching market data…';
+ try{
+  const d=await api('/api/market/detail/'+encodeURIComponent(selectedMarket)+'?interval='+encodeURIComponent($('detailInterval').value));
+  $('detailMeta').textContent=d.pair+' · '+d.provider+' · updated '+new Date(d.fetched_at).toLocaleTimeString();
+  $('detailPrice').textContent='setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();loadMarketDetail('BTC');setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);
+</script></body></html>+num(d.ticker.price,8);$('detailChange').textContent=num(d.ticker.change_24h_pct,2)+'%';$('detailChange').className=d.ticker.change_24h_pct>=0?'positive':'negative';$('detailVolume').textContent='setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);
+</script></body></html>+num(d.ticker.quote_volume_24h_usdt,0);$('detailTrades').textContent=num(d.ticker.trades_24h,0);
+  drawCandles(d.candles);$('detailChartMeta').textContent=d.candles.length+' completed '+d.interval+' candles · last candle '+new Date(d.candles[d.candles.length-1].timestamp).toLocaleTimeString();
+  $('detailSignal').innerHTML='<span class="pill '+sig(d.signal.signal)+'">'+esc(d.signal.signal)+'</span> <span class="pill">Score '+num(d.signal.score,3)+'</span> <span class="pill">'+esc(d.signal.regime||'unknown')+'</span>';
+  $('detailReason').textContent=d.signal.reason||'No reason returned';$('detailComponents').textContent='Trend '+num(d.signal.components?.trend,2)+' · Momentum '+num(d.signal.components?.momentum,2)+' · Mean reversion '+num(d.signal.components?.mean_reversion,2);
+ }catch(e){$('detailMeta').textContent='Live data unavailable';$('detailReason').textContent=e.message;$('detailChart').innerHTML='<text x="20" y="30">Candles unavailable: '+esc(e.message)+'</text>';$('detailSignal').innerHTML='<span class="pill hold">HOLD · DATA UNAVAILABLE</span>';}
+}
+$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);
+</script></body></html>+num(x.quote_volume_24h_usdt,0)+'</div><div class="small">'+esc(x.reason)+'</div></div><button onclick="loadMarketDetail(\''+esc(x.symbol)+'\')">Open chart</button></div>').join('')||'No candidates returned. If public candle data is unavailable, no recommendation is made.';
+ }catch(e){$('candidateStatus').textContent='UNAVAILABLE';$('candidateRows').textContent=e.message;}
 }
 let selectedMarket='BTC';
 function drawCandles(candles){
