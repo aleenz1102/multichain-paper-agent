@@ -96,7 +96,7 @@ class TrendingUniverseProvider:
                             continue
                         if not all(math.isfinite(x) for x in (last, quote_volume, change, high, low)):
                             continue
-                        if last <= 0 or quote_volume < min_quote_volume or trades < 100 or high < low:
+                        if last <= 0 or trades < 100 or high < low:
                             continue
                         rows.append({
                             "symbol": base, "pair": pair, "price_usdt": last,
@@ -130,8 +130,8 @@ class TrendingUniverseProvider:
                 "scanned_at": datetime.now(timezone.utc).isoformat(),
                 "quote": "USDT",
                 "minimum_quote_volume_usdt": min_quote_volume,
-                "count": min(limit, len(rows)),
-                "items": [dict(x) for x in rows[:limit]],
+                "count": min(limit, len([row for row in rows if row["quote_volume_24h_usdt"] >= min_quote_volume])),
+                "items": [dict(x) for x in [row for row in rows if row["quote_volume_24h_usdt"] >= min_quote_volume][:limit]],
                 "warning": "Trend score is a ranking heuristic, not a probability of profit. Public ticker data is not an execution quote.",
             }
 

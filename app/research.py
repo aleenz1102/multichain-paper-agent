@@ -74,6 +74,43 @@ def _run_segment(data, signal_fn, cfg, warmup=()):
     return run_backtest(combined, segment_only_signal, BacktestConfig(**cfg))
 
 
+def _buy_hold_benchmark(candles, *, initial_cash, fee_bps, slippage_bps, position_fraction):
+    """Comparable long-only test-window baseline, including entry/exit costs."""
+    closes = _closes(candles)
+    if len(closes) < 2:
+        return {"return_pct": 0.0, "max_drawdown_pct": 0.0, "fill_count": 0}
+    fee = fee_bps / 10_000.0
+    slip = slippage_bps / 10_000.0
+    allocation = initial_cash * position_fraction
+    entry = closes[0] * (1 + slip)
+    entry_fee = allocation * fee
+    qty = max(0.0, allocation - entry_fee) / entry
+    cash = initial_cash - allocation
+    equity = []
+    for close in closes:
+        equity.append(cash + qty * close)
+    exit_value = qty * closes[-1] * (1 - slip)
+    exit_fee = exit_value * fee
+    final_equity = cash + exit_value - exit_fee
+    # Include liquidation slippage and exit fees in the final marked equity used for drawdown.
+    equity[-1] = final_equity
+    peak = initial_cash
+    max_dd = 0.0
+    for value in equity:
+        peak = max(peak, value)
+        if peak > 0:
+            max_dd = max(max_dd, (peak - value) / peak)
+    return {
+        "initial_equity": round(initial_cash, 4),
+        "final_equity": round(final_equity, 4),
+        "net_pnl": round(final_equity - initial_cash, 4),
+        "return_pct": round((final_equity / initial_cash - 1) * 100, 4),
+        "max_drawdown_pct": round(max_dd * 100, 4),
+        "fill_count": 2,
+        "assumptions": "Long-only buy-and-hold across the test window; same allocation fraction, entry/exit fees and slippage as the strategy model.",
+    }
+
+
 def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
                         slippage_bps=8.0, position_fraction=0.10,
                         train_fraction=0.60, validation_fraction=0.20):
@@ -83,6 +120,14 @@ def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
     the strategy. This remains an approximate simulator, not a profitability guarantee.
     """
     data = list(candles)
+    if not isfinite(float(initial_cash)) or initial_cash <= 0:
+        raise ValueError("initial_cash must be finite and positive.")
+    if not isfinite(float(fee_bps)) or fee_bps < 0:
+        raise ValueError("fee_bps must be finite and non-negative.")
+    if not isfinite(float(slippage_bps)) or slippage_bps < 0:
+        raise ValueError("slippage_bps must be finite and non-negative.")
+    if not isfinite(float(position_fraction)) or not 0 < position_fraction <= 1:
+        raise ValueError("position_fraction must be in (0, 1].")
     if len(data) < 120:
         raise ValueError("At least 120 chronological candles are required for three evaluation windows.")
     if not 0.5 <= train_fraction <= 0.8:
@@ -118,6 +163,8 @@ def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
     selected = max(CANDIDATES, key=lambda name: (selection_score(validation_results[name]),
                                                   validation_results[name]["return_pct"]))
     test_result = _run_segment(test, CANDIDATES[selected], cfg, warmup=data[b - 30:b])
+    benchmark_result = _buy_hold_benchmark(test, initial_cash=initial_cash, fee_bps=fee_bps,
+                                           slippage_bps=slippage_bps, position_fraction=position_fraction)
 
     def compact(result):
         return {key: result[key] for key in ("initial_equity", "final_equity", "net_pnl", "return_pct",
@@ -136,8 +183,11 @@ def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
             "train": {"candles": len(training), **compact(train_results[selected])},
             "validation": {"candles": len(validation), **compact(validation_results[selected])},
             "test": {"candles": len(test), **compact(test_result)},
+            "test_buy_and_hold_benchmark": {"candles": len(test), **benchmark_result},
         },
         "cost_model": {"fee_bps_per_fill": fee_bps, "slippage_bps_per_fill": slippage_bps},
         "test_is_profitable_after_costs": test_result["net_pnl"] > 0,
-        "warning": "Strategy selection is a small heuristic comparison, not machine learning or a guarantee of future returns. The test window is not used for selection. Short collateral, funding, liquidation, and realistic execution still require independent validation.",
+        "test_excess_return_vs_buy_and_hold_pct_points": round(test_result["return_pct"] - benchmark_result["return_pct"], 4),
+        "test_outperformed_buy_and_hold_after_costs": test_result["return_pct"] > benchmark_result["return_pct"],
+        "warning": "Strategy selection is a small heuristic comparison, not machine learning or a guarantee of future returns. The final test window is not used for selection. Compare the selected strategy against the included cost-aware buy-and-hold baseline; a positive return alone is not evidence of edge. Sharpe is per-step, not annualized. Short collateral, funding, liquidation, and realistic execution still require independent validation.",
     }

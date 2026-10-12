@@ -1,12 +1,13 @@
 """Small deterministic OHLCV backtest harness for strategy research.
 
-This deliberately simple close-to-next-close model includes fees and slippage and supports
-long-only or long/short direction. It is not a substitute for a full execution simulator.
+This close-to-next-close model includes fees and slippage. It is an educational
+approximation, not an execution simulator or profitability guarantee.
 """
 from dataclasses import dataclass
-from math import sqrt
+from math import isfinite, sqrt
 from statistics import mean, pstdev
 from typing import Callable, Iterable
+
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -17,64 +18,131 @@ class BacktestConfig:
     position_fraction: float = 0.10
 
 
-def run_backtest(candles: Iterable[dict], signal_fn: Callable[[list], dict], config: BacktestConfig = BacktestConfig()):
+def run_backtest(
+    candles: Iterable[dict],
+    signal_fn: Callable[[list], dict],
+    config: BacktestConfig = BacktestConfig(),
+):
     data = list(candles)
+    numeric_config = {
+        "initial_cash": config.initial_cash,
+        "fee_bps": config.fee_bps,
+        "slippage_bps": config.slippage_bps,
+        "position_fraction": config.position_fraction,
+    }
+    try:
+        invalid_config = any(not isfinite(float(value)) for value in numeric_config.values())
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Backtest configuration values must be finite numbers.") from exc
+    if invalid_config:
+        raise ValueError("Backtest configuration values must be finite numbers.")
     if config.initial_cash <= 0 or not 0 < config.position_fraction <= 1:
         raise ValueError("Invalid initial cash or position fraction.")
+    if config.fee_bps < 0 or config.slippage_bps < 0:
+        raise ValueError("Fee and slippage assumptions must be non-negative.")
+    if config.fee_bps >= 10_000 or config.slippage_bps >= 10_000:
+        raise ValueError("Fee and slippage assumptions must be below 10000 bps.")
     if len(data) < 2:
         raise ValueError("At least two candles are required.")
-    closes = [float(c["close"]) for c in data]
-    if any(p <= 0 for p in closes):
-        raise ValueError("Close prices must be positive.")
+
+    try:
+        closes = [float(c["close"]) for c in data]
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Every candle must contain a numeric close price.") from exc
+    if any(not isfinite(price) or price <= 0 for price in closes):
+        raise ValueError("Close prices must be finite and positive.")
+
     cash = config.initial_cash
     qty = 0.0  # positive long, negative short
     equity_curve = []
     fills = []
     fee_rate = config.fee_bps / 10_000
     slip_rate = config.slippage_bps / 10_000
+
     for i in range(1, len(data)):
-        # Signal sees only candles through i-1; execution uses candle i close.
+        # The signal sees only candles through i-1; execution uses candle i close.
         decision = signal_fn(data[:i])
-        signal = decision.get("signal", "HOLD")
+        if not isinstance(decision, dict):
+            raise ValueError("Signal function must return a dictionary.")
+        signal = str(decision.get("signal", "HOLD")).upper()
+        if signal not in {"BUY", "SELL", "HOLD"}:
+            signal = "HOLD"
         px = closes[i]
         target = 1 if signal == "BUY" else (-1 if signal == "SELL" and config.allow_shorts else 0)
         current_side = 1 if qty > 0 else (-1 if qty < 0 else 0)
+
         if target != current_side:
             if qty:
+                # Closing a long sells quantity; covering a short buys quantity.
                 close_px = px * (1 - slip_rate if qty > 0 else 1 + slip_rate)
-                gross = qty * close_px
-                fee = abs(gross) * fee_rate
-                cash += gross - fee
-                fills.append({"index": i, "action": "CLOSE_LONG" if qty > 0 else "COVER_SHORT", "price": close_px, "qty": abs(qty), "fee": fee})
+                gross = abs(qty) * close_px
+                fee = gross * fee_rate
+                cash += gross - fee if qty > 0 else -(gross + fee)
+                fills.append({
+                    "index": i,
+                    "action": "CLOSE_LONG" if qty > 0 else "COVER_SHORT",
+                    "price": close_px,
+                    "qty": abs(qty),
+                    "fee": fee,
+                })
                 qty = 0.0
+
             if target:
+                # Size against positive equity/cash only; a depleted simulation cannot
+                # silently create a new long or short with an invented borrowing facility.
                 notional = max(0.0, cash) * config.position_fraction
                 if notional > 0:
                     open_px = px * (1 + slip_rate if target > 0 else 1 - slip_rate)
                     new_qty = target * notional / open_px
                     fee = notional * fee_rate
                     if target > 0:
-                        cash -= abs(new_qty) * open_px + fee
+                        cash -= notional + fee
                     else:
-                        # Short-sale proceeds credit cash; the negative quantity marks the liability.
-                        cash += abs(new_qty) * open_px - fee
+                        # Explicitly model short-sale proceeds and later liability cover.
+                        cash += notional - fee
                     qty = new_qty
-                    fills.append({"index": i, "action": "OPEN_LONG" if target > 0 else "OPEN_SHORT", "price": open_px, "qty": abs(qty), "fee": fee})
+                    fills.append({
+                        "index": i,
+                        "action": "OPEN_LONG" if target > 0 else "OPEN_SHORT",
+                        "price": open_px,
+                        "qty": abs(qty),
+                        "fee": fee,
+                    })
+
         equity_curve.append(cash + qty * px)
+
     if not equity_curve:
         equity_curve = [config.initial_cash]
-    returns = [equity_curve[i] / equity_curve[i-1] - 1 for i in range(1, len(equity_curve)) if equity_curve[i-1] > 0]
+    returns = [
+        equity_curve[i] / equity_curve[i - 1] - 1
+        for i in range(1, len(equity_curve))
+        if equity_curve[i - 1] > 0
+    ]
     peak = config.initial_cash
     max_dd = 0.0
     for value in equity_curve:
         peak = max(peak, value)
         if peak > 0:
-            max_dd = max(max_dd, (peak-value)/peak)
+            max_dd = max(max_dd, (peak - value) / peak)
     net = equity_curve[-1] - config.initial_cash
-    return {"initial_equity": config.initial_cash, "final_equity": round(equity_curve[-1], 4), "net_pnl": round(net, 4),
-            "return_pct": round(net/config.initial_cash*100, 4), "max_drawdown_pct": round(max_dd*100, 4),
-            "volatility_per_step_pct": round(pstdev(returns)*100, 4) if len(returns)>1 else 0.0,
-            "sharpe_per_step": round(mean(returns)/pstdev(returns)*sqrt(len(returns)), 4) if len(returns)>1 and pstdev(returns)>0 else None,
-            "fill_count": len(fills), "fills": fills, "equity_curve": [round(x,4) for x in equity_curve],
-            "assumptions": {"fee_bps": config.fee_bps, "slippage_bps": config.slippage_bps, "allow_shorts": config.allow_shorts,
-                            "execution": "signal from prior candles, fill at next close; educational approximation"}}
+    return {
+        "initial_equity": config.initial_cash,
+        "final_equity": round(equity_curve[-1], 4),
+        "net_pnl": round(net, 4),
+        "return_pct": round(net / config.initial_cash * 100, 4),
+        "max_drawdown_pct": round(max_dd * 100, 4),
+        "volatility_per_step_pct": round(pstdev(returns) * 100, 4) if len(returns) > 1 else 0.0,
+        "sharpe_per_step": (
+            round(mean(returns) / pstdev(returns) * sqrt(len(returns)), 4)
+            if len(returns) > 1 and pstdev(returns) > 0 else None
+        ),
+        "fill_count": len(fills),
+        "fills": fills,
+        "equity_curve": [round(value, 4) for value in equity_curve],
+        "assumptions": {
+            "fee_bps": config.fee_bps,
+            "slippage_bps": config.slippage_bps,
+            "allow_shorts": config.allow_shorts,
+            "execution": "Signal from prior candles, fill at next close; educational approximation",
+        },
+    }

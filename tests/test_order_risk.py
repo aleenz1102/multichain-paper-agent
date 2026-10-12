@@ -157,5 +157,17 @@ class OrderRiskTests(unittest.TestCase):
         updated = main.update_settings(main.SettingsUpdate(virtual_cash=100000, max_trade_pct=5))
         self.assertEqual(updated["max_trade_pct"], 5)
 
+    def test_daily_loss_lockout_allows_sell_exit(self):
+        main.order(main.Order(symbol="SOL", side="BUY", amount=1000))
+        main.set_setting("daily_loss_limit_pct", 0.01)
+        main.set_setting("risk_lockout_reason", "daily_loss")
+        main.set_setting("risk_lockout_date", __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date().isoformat())
+        portfolio = main.portfolio()
+        position = next(p for p in portfolio["positions"] if p["symbol"] == "SOL")
+        result = main.order(main.Order(symbol="SOL", side="SELL", amount=position["market_value"], sell_percent=100))
+        self.assertTrue(result["ok"])
+        self.assertEqual(main.portfolio()["position_count"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
