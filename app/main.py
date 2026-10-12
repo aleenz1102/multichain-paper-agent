@@ -660,6 +660,45 @@ def ai_analyze(request: AIAnalysisInput):
             "advisory_only": True, "live_trading": False, "orders_submitted": False}
 
 
+
+@app.get("/api/market/detail/{symbol}")
+def market_detail(symbol: str, interval: str = "5m"):
+    """Read-only live ticker, completed candles and explainable signal for a USDT spot pair."""
+    symbol = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
+        raise HTTPException(400, "Invalid market symbol.")
+    if interval not in {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"}:
+        raise HTTPException(400, "Unsupported candle interval.")
+    pair = symbol + "USDT"
+    url = "https://data-api.binance.vision/api/v3/ticker/24hr?" + __import__("urllib.parse", fromlist=["urlencode"]).urlencode({"symbol": pair})
+    try:
+        req = Request(url, headers={"Accept": "application/json", "User-Agent": "multichain-paper-agent/1.0"})
+        with urlopen(req, timeout=8) as response:
+            ticker = json.loads(response.read().decode("utf-8"))
+        if not isinstance(ticker, dict) or ticker.get("symbol") != pair:
+            raise ValueError("Ticker response did not match requested USDT pair.")
+        candle_provider = _candle_provider if interval == _candle_provider.interval else BinancePublicCandleProvider(interval=interval, limit=150)
+        candles = candle_provider.get_candles(symbol)
+        signal = combined_signal(candles)
+        return {
+            "symbol": symbol, "pair": pair, "provider": "Binance public spot market data",
+            "fetched_at": datetime.now(timezone.utc).isoformat(), "interval": interval,
+            "ticker": {
+                "price": float(ticker["lastPrice"]),
+                "change_24h_pct": float(ticker["priceChangePercent"]),
+                "quote_volume_24h_usdt": float(ticker["quoteVolume"]),
+                "trades_24h": int(ticker["count"]),
+                "high_24h": float(ticker["highPrice"]), "low_24h": float(ticker["lowPrice"]),
+            },
+            "candles": candles, "signal": signal,
+            "warning": "Signal is rule-based research, not a profitability guarantee. No order is submitted.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        audit("MARKET_DETAIL_FAILED", {"symbol": symbol, "interval": interval, "error_type": type(exc).__name__})
+        raise HTTPException(503, "Live ticker or candle data unavailable; signal withheld.") from exc
+
 @app.get("/api/intelligence/universe")
 def intelligence_universe(limit: int = 30, min_quote_volume_usdt: float = 2_000_000):
     """Read-only ranked public Binance USDT spot universe."""
