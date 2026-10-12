@@ -92,6 +92,8 @@ def _buy_hold_benchmark(candles, *, initial_cash, fee_bps, slippage_bps, positio
     exit_value = qty * closes[-1] * (1 - slip)
     exit_fee = exit_value * fee
     final_equity = cash + exit_value - exit_fee
+    # Include liquidation slippage and exit fees in the final marked equity used for drawdown.
+    equity[-1] = final_equity
     peak = initial_cash
     max_dd = 0.0
     for value in equity:
