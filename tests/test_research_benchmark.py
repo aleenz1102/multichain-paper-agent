@@ -69,3 +69,14 @@ def test_walk_forward_rejects_non_finite_closes():
     candles[50]["close"] = float("nan")
     with pytest.raises(ValueError, match="finite and positive"):
         walk_forward_report(candles)
+
+
+
+def test_benchmark_drawdown_includes_final_exit_costs():
+    candles = make_candles()
+    with_costs = walk_forward_report(candles, fee_bps=10, slippage_bps=8)
+    without_costs = walk_forward_report(candles, fee_bps=0, slippage_bps=0)
+    costly_baseline = with_costs["windows"]["test_buy_and_hold_benchmark"]
+    free_baseline = without_costs["windows"]["test_buy_and_hold_benchmark"]
+    assert costly_baseline["return_pct"] < free_baseline["return_pct"]
+    assert costly_baseline["max_drawdown_pct"] > 0
