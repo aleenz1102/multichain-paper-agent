@@ -118,6 +118,14 @@ def walk_forward_report(candles, *, initial_cash=100_000.0, fee_bps=10.0,
     the strategy. This remains an approximate simulator, not a profitability guarantee.
     """
     data = list(candles)
+    if not isfinite(float(initial_cash)) or initial_cash <= 0:
+        raise ValueError("initial_cash must be finite and positive.")
+    if not isfinite(float(fee_bps)) or fee_bps < 0:
+        raise ValueError("fee_bps must be finite and non-negative.")
+    if not isfinite(float(slippage_bps)) or slippage_bps < 0:
+        raise ValueError("slippage_bps must be finite and non-negative.")
+    if not isfinite(float(position_fraction)) or not 0 < position_fraction <= 1:
+        raise ValueError("position_fraction must be in (0, 1].")
     if len(data) < 120:
         raise ValueError("At least 120 chronological candles are required for three evaluation windows.")
     if not 0.5 <= train_fraction <= 0.8:
