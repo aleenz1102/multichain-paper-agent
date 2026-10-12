@@ -13,7 +13,7 @@ try:
 except ImportError:
     pass
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from app.market_data import CoinGeckoFreeProvider, COINGECKO_IDS
 from app.intelligence import TrendingUniverseProvider, CryptoNewsProvider
@@ -326,24 +326,26 @@ def resume():
     return {"paused":False}
 @app.post("/api/reset")
 def reset():
-    # A reset is intentionally destructive and can only clear simulation tables.
-    # The settings table and the external SQLite backup are never deleted here.
+    """Clear simulation records only; never alter settings or backup files.
+
+    This endpoint is destructive, so keep the dashboard on localhost / a trusted
+    authenticated reverse proxy and retain independent backups of paper_agent.db.
+    """
     with _order_lock:
         set_setting("auto_monitor_enabled", False)
         set_setting("paused", True)
-        if _auto_scheduler is not None:
-            # The periodic loop observes the disabled setting before the next tick.
-            pass
         with connect() as c:
             c.execute("DELETE FROM trades")
             c.execute("DELETE FROM cash_adjustments")
             c.commit()
+        set_setting("high_water_equity", float(settings()["virtual_cash"]))
+        set_setting("risk_lockout_reason", "")
+        set_setting("risk_lockout_date", "")
         set_setting("paused", False)
-    set_setting("high_water_equity",float(settings()["virtual_cash"]))
-    set_setting("risk_lockout_reason", "")
-    set_setting("risk_lockout_date", "")
-    audit("SIMULATION_RESET",{"message":"Trade history cleared; virtual cash reset"})
-    return {"ok":True}
+    audit("SIMULATION_RESET", {"message": "Paper trade history cleared; settings preserved; no backup file touched"})
+    return {"ok": True}
+
+
 @app.get("/api/portfolio")
 def get_portfolio(): return portfolio()
 class WalletFunding(BaseModel):
