@@ -53,3 +53,54 @@ def combined_signal(candles, min_history=30):
         return {"signal": "HOLD", "score": round(score, 4), **regime_info, "components": {"trend": round(trend,4), "momentum": round(momentum,4), "mean_reversion": round(reversion,4)}, "reason": "High-volatility regime blocks new entries."}
     signal = "BUY" if score >= 0.35 else "SELL" if score <= -0.35 else "HOLD"
     return {"signal": signal, "score": round(score, 4), **regime_info, "components": {"trend": round(trend,4), "momentum": round(momentum,4), "mean_reversion": round(reversion,4)}, "reason": f"Combined score {score:.3f} in {regime_info['regime']} regime."}
+
+
+
+def build_trade_plan(candles, signal):
+    """Create a transparent long-only reference plan; levels are research estimates, not orders."""
+    closes = _closes(candles)
+    if not closes or signal.get("signal") != "BUY" or signal.get("regime") == "high_volatility":
+        return {
+            "available": False,
+            "reason": "No long entry plan: the current signal is not a qualified BUY.",
+            "entry_reference": None, "stop_loss": None, "take_profit_1": None,
+            "take_profit_2": None, "risk_reward_1": None, "risk_reward_2": None,
+        }
+    entry = closes[-1]
+    true_ranges = []
+    for i in range(max(1, len(candles) - 14), len(candles)):
+        c = candles[i]
+        try:
+            high, low, prev_close = float(c["high"]), float(c["low"]), closes[i - 1]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(isfinite(v) for v in (high, low, prev_close)) or high < low:
+            continue
+        true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    if len(true_ranges) < 5:
+        return {
+            "available": False, "reason": "Insufficient valid high/low candles to estimate risk levels.",
+            "entry_reference": entry, "stop_loss": None, "take_profit_1": None,
+            "take_profit_2": None, "risk_reward_1": None, "risk_reward_2": None,
+        }
+    atr = sum(true_ranges) / len(true_ranges)
+    risk_distance = max(1.5 * atr, entry * 0.005)
+    stop = entry - risk_distance
+    if stop <= 0:
+        return {
+            "available": False, "reason": "Risk estimate invalid; entry plan withheld.",
+            "entry_reference": entry, "stop_loss": None, "take_profit_1": None,
+            "take_profit_2": None, "risk_reward_1": None, "risk_reward_2": None,
+        }
+    return {
+        "available": True,
+        "method": "Reference levels: entry at latest completed close; stop at 1.5× recent ATR (minimum 0.5%); targets at 1.5R and 2R.",
+        "entry_reference": round(entry, 10),
+        "atr_14": round(atr, 10),
+        "stop_loss": round(stop, 10),
+        "take_profit_1": round(entry + 1.5 * risk_distance, 10),
+        "take_profit_2": round(entry + 2.0 * risk_distance, 10),
+        "risk_reward_1": 1.5,
+        "risk_reward_2": 2.0,
+        "risk_distance_pct": round(risk_distance / entry * 100, 3),
+    }
