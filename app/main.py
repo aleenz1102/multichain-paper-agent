@@ -350,25 +350,46 @@ def order(o: Order):
         )
         realized_today = sum(t["realized_pnl"] for t in todays_sells)
         daily_loss_limit = s["virtual_cash"] * s["daily_loss_limit_pct"] / 100
-        if realized_today <= -daily_loss_limit:
-            set_setting("paused", True)
-            audit("DAILY_LOSS_LIMIT_TRIGGERED", {
-                "realized_pnl_today": realized_today, "loss_limit": daily_loss_limit,
-            })
-            raise HTTPException(400, "Daily realized-loss limit reached. Paper trading has been paused.")
-
+        daily_locked = realized_today <= -daily_loss_limit
         p = portfolio()
-        if not p.get("valuation_complete", True):
-            raise HTTPException(503, "Portfolio has positions without fresh quotes; new paper orders are blocked until valuation recovers.")
-        peak_equity = float(p.get("high_water_equity", s.get("virtual_cash", 0)))
+        valuation_complete = bool(p.get("valuation_complete", True))
         drawdown_pct = float(p.get("drawdown_pct", 0))
         drawdown_limit = float(s.get("max_drawdown_pct", DEFAULTS["max_drawdown_pct"]))
-        if drawdown_pct >= drawdown_limit:
-            set_setting("paused", True)
-            audit("MAX_DRAWDOWN_TRIGGERED", {
-                "drawdown_pct": round(drawdown_pct, 4), "limit_pct": drawdown_limit,
-            })
-            raise HTTPException(400, "Maximum portfolio drawdown reached. Paper trading has been paused.")
+        drawdown_locked = valuation_complete and drawdown_pct >= drawdown_limit
+
+        if daily_locked:
+            risk_reason = "daily_loss"
+        elif not valuation_complete:
+            risk_reason = "stale_valuation"
+        elif drawdown_locked:
+            risk_reason = "max_drawdown"
+        else:
+            risk_reason = ""
+
+        previous_reason = str(s.get("risk_lockout_reason", "") or "")
+        previous_date = str(s.get("risk_lockout_date", "") or "")
+        if risk_reason:
+            set_setting("risk_lockout_reason", risk_reason)
+            set_setting("risk_lockout_date", today if risk_reason == "daily_loss" else "")
+            if previous_reason != risk_reason or (risk_reason == "daily_loss" and previous_date != today):
+                audit("RISK_CIRCUIT_BREAKER_TRIGGERED", {
+                    "reason": risk_reason,
+                    "realized_pnl_today": round(realized_today, 2),
+                    "daily_loss_limit": round(daily_loss_limit, 2),
+                    "drawdown_pct": round(drawdown_pct, 4),
+                    "drawdown_limit_pct": drawdown_limit,
+                    "valuation_complete": valuation_complete,
+                })
+            if side == "BUY":
+                if risk_reason == "daily_loss":
+                    raise HTTPException(400, "Daily realized-loss limit reached. New paper entries are locked until the UTC day resets.")
+                if risk_reason == "max_drawdown":
+                    raise HTTPException(400, "Maximum portfolio drawdown reached. New paper entries are locked.")
+                raise HTTPException(503, "Portfolio has positions without fresh quotes; new paper entries are blocked.")
+        elif previous_reason in ("daily_loss", "max_drawdown", "stale_valuation"):
+            set_setting("risk_lockout_reason", "")
+            set_setting("risk_lockout_date", "")
+            audit("RISK_CIRCUIT_BREAKER_CLEARED", {"previous_reason": previous_reason})
 
         mk = {x["symbol"]: x for x in market()}
         if o.symbol not in mk:
