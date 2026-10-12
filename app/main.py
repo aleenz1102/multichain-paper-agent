@@ -447,7 +447,6 @@ def auto_monitor_status():
     s = settings()
     return {
         "enabled": bool(s.get("auto_monitor_enabled", False)),
-        "interval_seconds": 300,
         "mode": "PAPER_AUTO_TRADE" if s.get("auto_monitor_enabled", False) else "AUDIT_ONLY",
         "orders_submitted": False,
         "scheduler_running": bool(_auto_scheduler and _auto_scheduler.running),
