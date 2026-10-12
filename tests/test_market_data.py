@@ -25,7 +25,7 @@ class MarketDataTests(unittest.TestCase):
 
         def opener(request, timeout):
             calls.append(request.full_url)
-            return FakeResponse({"solana": {"usd": 145.0}})
+            return FakeResponse({"solana": {"inr": 12000.0}})
 
         provider = CoinGeckoFreeProvider(opener=opener)
         with patch("app.market_data.time.time", return_value=1000.0):
@@ -33,8 +33,8 @@ class MarketDataTests(unittest.TestCase):
         with patch("app.market_data.time.time", return_value=1010.0):
             second = provider.get_prices(["SOL"])
         self.assertEqual(len(calls), 1)
-        self.assertEqual(first["SOL"].price, 145.0)
-        self.assertEqual(second["SOL"].price, 145.0)
+        self.assertEqual(first["SOL"].price, 12000.0)
+        self.assertEqual(second["SOL"].price, 12000.0)
         self.assertEqual(second["SOL"].status, "fresh")
         self.assertEqual(second["SOL"].fetched_at, first["SOL"].fetched_at)
 
