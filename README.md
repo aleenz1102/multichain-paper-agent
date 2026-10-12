@@ -102,7 +102,15 @@ $env:OPENAI_MODEL = "gpt-4o-mini"
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-### Important readiness boundary
+### Operations and production-hardening notes
+
+- Keep the app behind localhost or a trusted reverse proxy with authentication; the dashboard endpoints are not an authenticated multi-user service. Do not expose this instance directly to the public internet.
+- Run a single Uvicorn worker while the in-process paper scheduler is enabled. Multi-worker deployment can create duplicate schedulers and paper cycles.
+- Back up `paper_agent.db` and its backup file before upgrades. Database state is local and intentionally excluded from Git; this repository workflow never edits or commits either file.
+- Configure an explicit dependency update process and review CI on every proposed change. CI validates unit tests and syntax on Linux and Windows, but is not a substitute for a browser/API smoke test with your existing local data.
+- Automated mode is opt-in, public-data-only, and paper-only. If market data is stale/incomplete, the executor must stop rather than switch silently to demo prices.
+
+## Important readiness boundary
 
 This remains a paper-trading research project, not a certified production trading service. Before relying on it for unattended testing, run the full tests and Windows smoke test locally, review the provider's API terms/rate limits, and monitor the app during a long paper session. No profitability is implied. Live trading, exchange credentials, wallets, and real order execution are deliberately out of scope.
 
