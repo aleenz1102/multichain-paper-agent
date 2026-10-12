@@ -83,7 +83,23 @@ class OrderRiskTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as error:
                 main.order(main.Order(symbol="SOL", side="BUY", amount=100))
         self.assertIn("drawdown", error.exception.detail.lower())
-        self.assertTrue(main.settings()["paused"])
+        self.assertEqual(main.settings()["risk_lockout_reason"], "max_drawdown")
+        self.assertFalse(main.settings()["paused"])
+
+    def test_drawdown_lockout_blocks_buy_but_allows_sell_exit(self):
+        main.order(main.Order(symbol="SOL", side="BUY", amount=1000))
+        main.set_setting("max_drawdown_pct", 0.001)
+        with self.assertRaises(HTTPException) as error:
+            main.order(main.Order(symbol="SOL", side="BUY", amount=100))
+        self.assertIn("drawdown", error.exception.detail.lower())
+        self.assertEqual(main.settings()["risk_lockout_reason"], "max_drawdown")
+        portfolio = main.portfolio()
+        position = next(p for p in portfolio["positions"] if p["symbol"] == "SOL")
+        sold = main.order(main.Order(
+            symbol="SOL", side="SELL", amount=position["market_value"], sell_percent=100
+        ))
+        self.assertTrue(sold["ok"])
+        self.assertEqual(main.portfolio()["position_count"], 0)
 
     def test_exposure_cap_blocks_new_order(self):
         main.set_setting("max_exposure_pct", 5.0)
