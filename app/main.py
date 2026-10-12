@@ -143,11 +143,24 @@ def portfolio():
         if t["side"]=="BUY": cash-=t["notional"]+t["fee"]+t["slippage_cost"]
         else: cash+=t["notional"]-t["fee"]-t["slippage_cost"]
     unreal=0; exposure=0
+    valuation_complete = True
+    unpriced_positions = []
     for p in pos:
-        px=mk.get(p["symbol"],{}).get("price",0)
-        p["mark_price"]=px; p["market_value"]=p["qty"]*px
-        p["unrealized_pnl"]=p["market_value"]-p["cost"]
-        unreal+=p["unrealized_pnl"]; exposure+=p["market_value"]
+        px = mk.get(p["symbol"], {}).get("price")
+        if not isinstance(px, (int, float)) or not math.isfinite(float(px)) or px <= 0:
+            valuation_complete = False
+            unpriced_positions.append(p["symbol"])
+            p["mark_price"] = None
+            p["market_value"] = round(p["cost"], 2)  # display-only cost-basis fallback
+            p["unrealized_pnl"] = None
+            p["valuation_status"] = "COST_BASIS_FALLBACK"
+        else:
+            p["mark_price"] = float(px)
+            p["market_value"] = p["qty"] * float(px)
+            p["unrealized_pnl"] = p["market_value"] - p["cost"]
+            p["valuation_status"] = "FRESH"
+            unreal += p["unrealized_pnl"]
+        exposure += p["market_value"]
     realized=sum(t["realized_pnl"] for t in trades if t["side"]=="SELL")
     fees=sum(t["fee"] for t in trades); slip=sum(t["slippage_cost"] for t in trades)
     equity=cash+exposure
@@ -156,7 +169,8 @@ def portfolio():
             "virtual_topups":round(total_topups,2),
             "exposure":round(exposure,2),"realized_pnl":round(realized,2),"unrealized_pnl":round(unreal,2),
             "net_pnl":round(equity-s["virtual_cash"]-total_topups,2),"fees_paid":round(fees,2),"slippage_cost":round(slip,2),
-            "positions":pos,"position_count":len(pos)}
+            "positions":pos,"position_count":len(pos),
+            "valuation_complete":valuation_complete,"unpriced_positions":unpriced_positions}
 class Order(BaseModel):
     symbol: str
     side: str
@@ -322,6 +336,8 @@ def order(o: Order):
             raise HTTPException(400, "Daily realized-loss limit reached. Paper trading has been paused.")
 
         p = portfolio()
+        if not p.get("valuation_complete", True):
+            raise HTTPException(503, "Portfolio has positions without fresh quotes; new paper orders are blocked until valuation recovers.")
         initial_equity = float(s["virtual_cash"]) + float(p.get("virtual_topups", 0))
         drawdown_pct = max(0.0, (initial_equity - float(p["equity"])) / initial_equity * 100) if initial_equity > 0 else 0.0
         drawdown_limit = float(s.get("max_drawdown_pct", DEFAULTS["max_drawdown_pct"]))
@@ -340,7 +356,7 @@ def order(o: Order):
             raise HTTPException(503, "No fresh price is available for this asset; paper order rejected.")
         if s.get("market_data_mode", "synthetic") == "live_public" and not str(asset.get("data_status", "")).startswith("LIVE PUBLIC"):
             raise HTTPException(503, "Selected public price is stale or unavailable; paper order rejected.")
-        if o.amount > p["equity"] * s["max_trade_pct"] / 100:
+        if side == "BUY" and o.amount > p["equity"] * s["max_trade_pct"] / 100:
             raise HTTPException(400, f"Order exceeds max trade allocation ({s['max_trade_pct']}% of equity).")
 
         active = {x["symbol"]: x for x in p["positions"]}
