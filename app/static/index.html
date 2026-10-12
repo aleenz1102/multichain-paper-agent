@@ -60,10 +60,51 @@ async function pauseEngine(){try{await api('/api/pause',{method:'POST'});await r
 async function resumeEngine(){try{await api('/api/resume',{method:'POST'});await refresh()}catch(e){$('orderMessage').textContent=e.message}}
 async function resetSim(){if(!confirm('Clear all local paper trades and audit history?'))return;try{await api('/api/reset',{method:'POST'});await refresh()}catch(e){$('orderMessage').textContent=e.message}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
-async function refreshIntelligence(){try{const [u,n]=await Promise.all([api('/api/intelligence/universe?limit=20'),api('/api/intelligence/news?limit=12')]);$('intelStatus').textContent='Universe: '+u.provider_status+' · '+u.count+' markets · scanned '+new Date(u.scanned_at).toLocaleTimeString();$('liveMarketMeta').textContent='Binance public spot ticker · '+u.provider_status+' · '+(u.count||u.items.length)+' pairs · updated '+new Date(u.scanned_at).toLocaleTimeString();$('feedstatus').textContent=u.provider_status==='fresh'?'LIVE SCANNER · FRESH':'LIVE SCANNER · '+String(u.provider_status||'UNKNOWN').toUpperCase();$('market').innerHTML=u.items.map(x=>{const supported=[...document.querySelectorAll('#symbol option')].some(o=>o.value===x.symbol);return '<tr><td><strong>'+esc(x.symbol)+'</strong><div class="small">'+esc(x.pair)+'</div></td><td>$('trendingRows').innerHTML=u.items.map(x=>'<tr><td><strong>'+esc(x.symbol)+'</strong><div class="small">'+esc(x.pair)+'</div></td><td class="'+(x.change_24h_pct>=0?'positive':'negative')+'">'+num(x.change_24h_pct,2)+'%</td><td>'+num(x.quote_volume_24h_usdt,0)+'</td><td>'+num(x.trend_score,3)+'</td><td><button onclick="runBacktest(\''+esc(x.symbol)+'\')">Backtest</button></td></tr>').join('')||'<tr><td colspan="5">No qualifying markets.</td></tr>';$('newsList').innerHTML=n.items.map(x=>'<div class="newsitem"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">'+esc(x.title)+'</a><div class="small">'+esc(x.source)+' · '+esc(x.published_at||'time unknown')+' · '+esc(x.sentiment.label)+' sentiment ('+num(x.sentiment.confidence,2)+' confidence)</div></div>').join('')||'<div class="small">No current headlines available. News unavailable is treated as unknown, not bullish.</div>';if(n.provider_status==='unavailable')$('newsList').insertAdjacentHTML('afterbegin','<div class="small negative">RSS feeds unavailable; news veto is inactive until data returns.</div>');}catch(e){$('intelStatus').textContent='Market intelligence unavailable: '+e.message;$('newsList').textContent='News unavailable; no positive sentiment is assumed.';}}
-async function runBacktest(symbol){$('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'…';try{const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});const w=d.windows;$('backtestResult').textContent=symbol+' · '+d.candle_count+' candles · '+d.data_source+'\nValidation-selected strategy: '+d.selected_strategy+'\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%\nTest profitable after costs: '+d.test_is_profitable_after_costs+'\n'+d.warning;}catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}}
-$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);
-</script></body></html>+num(x.price_usdt,8)+'</td><td class="'+(x.change_24h_pct>=0?'positive':'negative')+'">'+num(x.change_24h_pct,2)+'%</td><td>'+num(x.quote_volume_24h_usdt,0)+'</td><td>'+num(x.trades_24h,0)+'</td><td><span class="pill">'+num(x.trend_score*100,1)+'%</span></td><td>'+(supported?'<button onclick="quick(\\''+esc(x.symbol)+'\\',\\'BUY\\')">Paper buy</button>':'<span class="pill hold">Watch only</span>')+'</td></tr>'}).join('')||'<tr><td colspan="7">No qualifying markets returned.</td></tr>';$('trendingRows').innerHTML=u.items.map(x=>'<tr><td><strong>'+esc(x.symbol)+'</strong><div class="small">'+esc(x.pair)+'</div></td><td class="'+(x.change_24h_pct>=0?'positive':'negative')+'">'+num(x.change_24h_pct,2)+'%</td><td>'+num(x.quote_volume_24h_usdt,0)+'</td><td>'+num(x.trend_score,3)+'</td><td><button onclick="runBacktest(\''+esc(x.symbol)+'\')">Backtest</button></td></tr>').join('')||'<tr><td colspan="5">No qualifying markets.</td></tr>';$('newsList').innerHTML=n.items.map(x=>'<div class="newsitem"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">'+esc(x.title)+'</a><div class="small">'+esc(x.source)+' · '+esc(x.published_at||'time unknown')+' · '+esc(x.sentiment.label)+' sentiment ('+num(x.sentiment.confidence,2)+' confidence)</div></div>').join('')||'<div class="small">No current headlines available. News unavailable is treated as unknown, not bullish.</div>';if(n.provider_status==='unavailable')$('newsList').insertAdjacentHTML('afterbegin','<div class="small negative">RSS feeds unavailable; news veto is inactive until data returns.</div>');}catch(e){$('intelStatus').textContent='Market intelligence unavailable: '+e.message;$('newsList').textContent='News unavailable; no positive sentiment is assumed.';}}
-async function runBacktest(symbol){$('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'…';try{const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});const w=d.windows;$('backtestResult').textContent=symbol+' · '+d.candle_count+' candles · '+d.data_source+'\nValidation-selected strategy: '+d.selected_strategy+'\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%\nTest profitable after costs: '+d.test_is_profitable_after_costs+'\n'+d.warning;}catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}}
+async function refreshIntelligence(){
+ try{
+  const [u,n]=await Promise.all([
+   api('/api/intelligence/universe?limit=30'),
+   api('/api/intelligence/news?limit=12')
+  ]);
+  const scannedAt=u.scanned_at?new Date(u.scanned_at).toLocaleTimeString():'time unknown';
+  $('intelStatus').textContent='Universe: '+u.provider_status+' · '+u.count+' markets · scanned '+scannedAt;
+  $('liveMarketMeta').textContent='Binance public spot ticker · '+u.provider_status+' · '+(u.count||u.items.length)+' pairs · updated '+scannedAt;
+  $('feedstatus').textContent=u.provider_status==='fresh'?'LIVE SCANNER · FRESH':'LIVE SCANNER · '+String(u.provider_status||'UNKNOWN').toUpperCase();
+  const supportedSymbols=new Set([...document.querySelectorAll('#symbol option')].map(o=>o.value));
+  $('market').innerHTML=(u.items||[]).map(x=>{
+   const supported=supportedSymbols.has(x.symbol);
+   const action=supported
+    ? '<button onclick="quick(\\''+esc(x.symbol)+'\\',\\'BUY\\')">Paper buy</button>'
+    : '<span class="pill hold">Watch only</span>';
+   return '<tr><td><strong>'+esc(x.symbol)+'</strong><div class="small">'+esc(x.pair)+'</div></td>'+
+    '<td>$'+num(x.price_usdt,8)+'</td>'+
+    '<td class="'+(Number(x.change_24h_pct)>=0?'positive':'negative')+'">'+num(x.change_24h_pct,2)+'%</td>'+
+    '<td>'+num(x.quote_volume_24h_usdt,0)+'</td>'+
+    '<td>'+num(x.trades_24h,0)+'</td>'+
+    '<td><span class="pill">'+num(Number(x.trend_score||0)*100,1)+'%</span></td><td>'+action+'</td></tr>';
+  }).join('')||'<tr><td colspan="7">No qualifying markets returned.</td></tr>';
+  $('trendingRows').innerHTML=(u.items||[]).map(x=>'<tr><td><strong>'+esc(x.symbol)+'</strong><div class="small">'+esc(x.pair)+'</div></td><td class="'+(Number(x.change_24h_pct)>=0?'positive':'negative')+'">'+num(x.change_24h_pct,2)+'%</td><td>'+num(x.quote_volume_24h_usdt,0)+'</td><td>'+num(x.trend_score,3)+'</td><td><button onclick="runBacktest(\\''+esc(x.symbol)+'\\')">Backtest</button></td></tr>').join('')||'<tr><td colspan="5">No qualifying markets.</td></tr>';
+  $('newsList').innerHTML=(n.items||[]).map(x=>'<div class="newsitem"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">'+esc(x.title)+'</a><div class="small">'+esc(x.source)+' · '+esc(x.published_at||'time unknown')+' · '+esc(x.sentiment?.label||'unknown')+' sentiment ('+num(x.sentiment?.confidence,2)+' confidence)</div></div>').join('')||'<div class="small">No current headlines available. News unavailable is treated as unknown, not bullish.</div>';
+  if(n.provider_status==='unavailable')$('newsList').insertAdjacentHTML('afterbegin','<div class="small negative">RSS feeds unavailable; news veto is inactive until data returns.</div>');
+ }catch(e){
+  $('intelStatus').textContent='Market intelligence unavailable: '+e.message;
+  $('liveMarketMeta').textContent='Live market scanner unavailable';
+  $('market').innerHTML='<tr><td colspan="7" class="negative">Live market data unavailable: '+esc(e.message)+'</td></tr>';
+  $('newsList').textContent='News unavailable; no positive sentiment is assumed.';
+ }
+}
+async function runBacktest(symbol){
+ $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'…';
+ try{
+  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
+  const w=d.windows;
+  $('backtestResult').textContent=symbol+' · '+d.candle_count+' candles · '+d.data_source+
+   '\\nValidation-selected strategy: '+d.selected_strategy+
+   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
+   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
+   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
+   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+'\\n'+d.warning;
+ }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
+}
 $('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);refresh();refreshAiStatus();refreshIntelligence();setInterval(refresh,10000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);
 </script></body></html>
