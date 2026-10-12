@@ -699,6 +699,59 @@ def market_detail(symbol: str, interval: str = "5m"):
         audit("MARKET_DETAIL_FAILED", {"symbol": symbol, "interval": interval, "error_type": type(exc).__name__})
         raise HTTPException(503, "Live ticker or candle data unavailable; signal withheld.") from exc
 
+
+@app.get("/api/intelligence/candidates")
+def intelligence_candidates(limit: int = 8):
+    """Rank a bounded set of liquid USDT pairs using live ticker data and completed-candle signals."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    limit = max(1, min(int(limit), 12))
+    try:
+        scan = universe_provider.scan(limit=100, min_quote_volume=500_000)
+    except RuntimeError as exc:
+        raise HTTPException(503, "Public USDT market scan unavailable; no candidates ranked.") from exc
+    ranked = scan.get("items", [])
+    shortlist = ranked[:min(12, len(ranked))]
+    results = []
+
+    def evaluate(item):
+        symbol = item["symbol"]
+        candles = _candle_provider.get_candles(symbol)
+        signal = combined_signal(candles)
+        # Trend score alone cannot trigger a BUY; require a candle-based BUY signal.
+        eligible = signal.get("signal") == "BUY" and signal.get("regime") != "high_volatility"
+        combined_rank = max(0.0, min(1.0, 0.55 * max(0.0, float(item.get("trend_score", 0))) +
+                                     0.45 * max(0.0, float(signal.get("score", 0)))))
+        return {
+            "symbol": symbol, "pair": item["pair"], "price_usdt": item["price_usdt"],
+            "change_24h_pct": item["change_24h_pct"],
+            "quote_volume_24h_usdt": item["quote_volume_24h_usdt"],
+            "trend_score": item["trend_score"], "signal": signal.get("signal", "HOLD"),
+            "signal_score": signal.get("score", 0), "candidate_score": round(combined_rank, 4),
+            "regime": signal.get("regime", "unknown"), "eligible_candidate": eligible,
+            "reason": signal.get("reason", "No signal reason available."),
+            "candles_completed": len(candles),
+        }
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(evaluate, item): item for item in shortlist}
+        for future in as_completed(futures):
+            try:
+                results.append(future.result())
+            except Exception:
+                # A failed/stale candle feed means no recommendation for that symbol.
+                continue
+    results.sort(key=lambda x: (x["eligible_candidate"], x["candidate_score"]), reverse=True)
+    return {
+        "provider": "Binance public spot ticker + completed candles",
+        "provider_status": scan.get("provider_status", "unknown"),
+        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "evaluated": len(results), "requested_limit": limit,
+        "items": results[:limit],
+        "warning": "Rank is a research heuristic, not a probability or guarantee of profit. Only candle-confirmed BUY signals are eligible candidates; paper risk controls still apply.",
+    }
+
+
 @app.get("/api/intelligence/universe")
 def intelligence_universe(limit: int = 30, min_quote_volume_usdt: float = 2_000_000):
     """Read-only ranked public Binance USDT spot universe."""
