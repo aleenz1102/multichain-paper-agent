@@ -22,6 +22,13 @@ class OrderRiskTests(unittest.TestCase):
         main.shutdown()
         self.assertFalse(main._auto_scheduler.running)
 
+    def test_live_market_provider_failure_returns_503(self):
+        with patch.object(main.live_provider, "get_prices", side_effect=RuntimeError("provider detail")):
+            with self.assertRaises(HTTPException) as error:
+                main.get_live_market("SOL")
+        self.assertEqual(error.exception.status_code, 503)
+        self.assertNotIn("provider detail", str(error.exception.detail))
+
     def test_missing_live_quote_blocks_order(self):
         main.set_setting("market_data_mode", "live_public")
         with patch.object(main.live_provider, "get_prices", return_value={}):
