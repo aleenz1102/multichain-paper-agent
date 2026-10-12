@@ -234,7 +234,7 @@ def get_live_market(symbols: str = "SOL,ETH,ARB,BNB,JUP,AERO,STRK,PENGU,TIA,HYPE
     requested = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
     data = live_provider.get_prices(requested)
     return {"mode":"LIVE_PUBLIC_DATA_READ_ONLY", "new_entries_allowed": all(x.status == "fresh" for x in data.values()) and bool(data),
-            "items":[{"symbol":x.symbol,"price_usd":x.price,"provider":x.provider,"fetched_at":x.fetched_at,"status":x.status,"error":x.error} for x in data.values()]}
+            "items":[{"symbol":x.symbol,"price_inr":x.price,"currency":"INR","provider":x.provider,"fetched_at":x.fetched_at,"status":x.status,"error":x.error} for x in data.values()]}
 
 class CandleInput(BaseModel):
     candles: list[dict] = Field(min_length=2, max_length=5000)
