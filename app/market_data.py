@@ -79,7 +79,7 @@ class CoinGeckoFreeProvider:
             if stale_symbols:
                 params = urlencode({
                     "ids": ",".join(sorted({ids[symbol] for symbol in stale_symbols})),
-                    "vs_currencies": "usd",
+                    "vs_currencies": "inr",
                 })
                 req = Request(
                     "https://api.coingecko.com/api/v3/simple/price?" + params,
@@ -94,7 +94,7 @@ class CoinGeckoFreeProvider:
                     for symbol in stale_symbols:
                         coin_id = ids[symbol]
                         entry = payload.get(coin_id)
-                        price = entry.get("usd") if isinstance(entry, dict) else None
+                        price = entry.get("inr") if isinstance(entry, dict) else None
                         if isinstance(price, (int, float)) and math.isfinite(float(price)) and price > 0:
                             self.cache[symbol] = (float(price), fetched_at)
                         else:
