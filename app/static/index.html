@@ -185,7 +185,10 @@ async function loadMarketDetail(symbol){
  if(!symbol)return;$('detailTitle').textContent=symbol+'/USDT';$('detailMeta').textContent='Refreshing public ticker and candles...';
  try{const d=await api('/api/market/detail/'+encodeURIComponent(symbol)+'?interval='+encodeURIComponent(selectedInterval)),t=d.ticker||{};
  $('detailPrice').textContent='$'+num(t.price,8);$('detailChange').textContent=num(t.change_24h_pct,2)+'%';$('detailChange').className='value '+(Number(t.change_24h_pct)>=0?'positive':'negative');$('detailVolume').textContent=num(t.quote_volume_24h_usdt,0);$('detailRange').textContent='$'+num(t.low_24h,8)+' – $'+num(t.high_24h,8);
- $('detailMeta').textContent=d.provider+'  |  '+(d.fetched_at?new Date(d.fetched_at).toLocaleTimeString():'updated now')+'  |  '+(d.candles||[]).length+' candles';
+ const candleCount=(d.candles||[]).length;
+ if(marketTickerTimer){$('detailMeta').textContent='REST LIVE | '+symbol+'/USDT | ticker 1s | candles '+candleCount+' | refreshed '+new Date().toLocaleTimeString();}
+ else if(marketSocket&&marketSocket.readyState===WebSocket.OPEN){$('detailMeta').textContent='LIVE STREAM | '+symbol+'/USDT | '+selectedInterval+' | candles '+candleCount;}
+ else{$('detailMeta').textContent=d.provider+' | '+(d.fetched_at?new Date(d.fetched_at).toLocaleTimeString():'updated now')+' | '+candleCount+' candles';}
  const s=d.signal||{};$('detailSignal').textContent=(s.signal||'HOLD')+'  |  '+String(s.regime||'UNKNOWN').replaceAll('_',' ').toUpperCase();$('detailSignal').className='pill '+String(s.signal||'HOLD').toLowerCase();$('detailScore').textContent='Score '+num(Number(s.score||0)*100,1)+'%';$('detailReason').textContent=s.reason||'No signal rationale available.';liveCandles=(d.candles||[]).slice(-150);drawCandles(d.forming_candle?[...liveCandles,d.forming_candle]:(d.candles||[]));$('detailWarning').textContent=d.warning||'Research signal only. No order submitted.';
  }catch(e){$('detailMeta').textContent='Live detail unavailable: '+e.message;$('candleChart').innerHTML='<div class="small negative" style="padding:18px">Live candles unavailable; signal withheld.</div>';$('detailSignal').textContent='SIGNAL WITHHELD';$('detailReason').textContent='No stale or fabricated signal is displayed.';}
 }
