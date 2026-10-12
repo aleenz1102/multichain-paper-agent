@@ -99,7 +99,7 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&
 async function refreshIntelligence(){
  try{
   const [u,n]=await Promise.all([
-   api('/api/intelligence/universe?limit=30'),
+   api('/api/intelligence/universe?limit=50'),
    api('/api/intelligence/news?limit=12')
   ]);
   const scannedAt=u.scanned_at?new Date(u.scanned_at).toLocaleTimeString():'time unknown';
