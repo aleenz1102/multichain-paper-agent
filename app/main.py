@@ -200,7 +200,7 @@ class SettingsUpdate(BaseModel):
     daily_loss_limit_pct: Optional[float] = Field(default=None, gt=0, le=100)
     max_positions: Optional[int] = Field(default=None, ge=1, le=30)
     auto_monitor_enabled: Optional[bool] = None
-    virtual_cash: Optional[float] = Field(default=None, ge=1000, le=100000000)
+    virtual_cash: Optional[float] = Field(default=None, ge=1, le=100000000)
     max_drawdown_pct: Optional[float] = Field(default=None, gt=0, le=100)
     max_exposure_pct: Optional[float] = Field(default=None, gt=0, le=100)
     market_data_mode: Optional[str] = None
