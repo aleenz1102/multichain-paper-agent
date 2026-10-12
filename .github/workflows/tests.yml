@@ -3,7 +3,7 @@ name: Python tests
 on:
   pull_request:
   push:
-    branches: [main, feat/neon-paper-agent-dashboard]
+    branches: [main, feat/neon-paper-agent-dashboard, feat/usdt-smart-terminal, feat/usdt-market-detail, feat/autonomous-paper-trader, hardening/production-readiness]
 
 jobs:
   unittest:
