@@ -28,7 +28,7 @@ class BinancePublicCandleProvider:
     def __init__(
         self,
         interval="5m",
-        limit=100,
+        limit=250,
         timeout_seconds=8,
         stale_after_seconds=600,
         opener=urlopen,
