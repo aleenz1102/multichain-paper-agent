@@ -284,7 +284,7 @@ _auto_scheduler: PaperAutoScheduler | None = None
 
 @app.on_event("startup")
 def startup():
-    global _auto_scheduler
+    global _auto_scheduler, _multi_market_scheduler
     init_db()
     _auto_scheduler = PaperAutoScheduler(
         enabled=lambda: bool(settings().get("auto_monitor_enabled", False)),
@@ -294,11 +294,21 @@ def startup():
         interval_seconds=60,
     )
     _auto_scheduler.start()
+    _multi_market_scheduler = PaperAutoScheduler(
+        enabled=lambda: bool(multi_market_settings().get("auto_enabled", False)),
+        paused=lambda: bool(multi_market_settings().get("paused", False)),
+        run_cycle=lambda: multi_market_auto_cycle(),
+        audit=audit,
+        interval_seconds=60,
+    )
+    _multi_market_scheduler.start()
 
 @app.on_event("shutdown")
 def shutdown():
     if _auto_scheduler is not None:
         _auto_scheduler.stop(timeout=10)
+    if _multi_market_scheduler is not None:
+        _multi_market_scheduler.stop(timeout=10)
 @app.get("/", response_class=HTMLResponse)
 def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 @app.get("/api/health")
