@@ -1416,14 +1416,19 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
         symbol = candidate["symbol"]
         try:
             candles = multi_market_candles(market_type, symbol)
-            if len(candles) < 30:
+            key = market_type + ":" + symbol
+            risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+            is_managed_position = key in risk_book
+            if not candles:
+                actions.append({"symbol": symbol, "status": "blocked", "reason": "No completed candle is available."})
+                continue
+            if len(candles) < 30 and not is_managed_position:
                 actions.append({"symbol": symbol, "status": "skipped", "reason": "Insufficient candle history."})
                 continue
             candle_ts = candles[-1].get("timestamp")
             if not candle_ts:
                 actions.append({"symbol": symbol, "status": "blocked", "reason": "Completed candle timestamp missing."})
                 continue
-            key = market_type + ":" + symbol
             if str(last_seen.get(key, "")) >= str(candle_ts):
                 actions.append({"symbol": symbol, "status": "skipped_duplicate_candle", "candle_timestamp": candle_ts})
                 continue
