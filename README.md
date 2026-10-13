@@ -110,6 +110,34 @@ $env:OPENAI_MODEL = "gpt-4o-mini"
 - Configure an explicit dependency update process and review CI on every proposed change. CI validates unit tests and syntax on Linux and Windows, but is not a substitute for a browser/API smoke test with your existing local data.
 - Automated mode is opt-in, public-data-only, and paper-only. If market data is stale/incomplete, the executor must stop rather than switch silently to demo prices.
 
+## Multi-market paper terminal
+
+The dashboard also includes a separate USD-denominated multi-market paper account and a market dropdown:
+
+- **Crypto:** public Binance USDT spot scanner and completed candles.
+- **Stocks:** selected US equities using Yahoo Finance's public chart endpoint.
+- **Forex:** selected major pairs quoted in USD (EUR/USD, GBP/USD, AUD/USD, NZD/USD).
+- **Commodities:** gold, silver, WTI, Brent, and natural-gas futures as fractional reference units.
+- **Indices:** US index references (S&P 500, NASDAQ Composite, Dow Jones) quoted in USD.
+- **Prediction markets:** active Polymarket binary-outcome probabilities via the public Gamma API. Manual paper orders are available; automated strategy cycles are deliberately disabled until reliable historical candles are supported.
+
+The multi-market account starts with **$30 virtual USD on a fresh database** and is held in new `multi_market_settings` and `multi_market_trades` tables. It is separate from the legacy crypto ledger; startup only adds missing tables/settings and does not reset, overwrite, or migrate existing trade history. Existing database settings are retained. The new account uses one virtual USD balance shared across the listed market categories, public prices, simulated fractional units, fees/slippage assumptions, and risk guardrails.
+
+New read-only / paper-only routes:
+
+- `GET /api/multi-market/catalog`
+- `GET /api/multi-market/instruments?market_type=stocks&limit=30`
+- `GET /api/multi-market/portfolio`
+- `GET /api/multi-market/settings` and `PATCH /api/multi-market/settings`
+- `POST /api/multi-market/orders`
+- `GET /api/multi-market/trades`
+- `GET /api/multi-market/auto/status` and `POST /api/multi-market/auto/run`
+- `POST /api/multi-market/pause` / `POST /api/multi-market/resume`
+
+Automated multi-market paper trading is off by default, runs on a 60-second scheduler after the selected market is enabled, and uses completed-candle signals for supported Yahoo/crypto market feeds. If a quote or candle is stale/missing, the engine withholds the trade rather than replacing it with demo data. Each order is virtual-only. Market references, especially futures and indices, are fractional simulation units and should not be interpreted as executable broker contracts. Public provider outages or rate limits can temporarily make a category unavailable.
+
+**Prediction-market automation remains disabled** because a reliable completed-candle history adapter is not yet enabled. This is intentional, not a silent fallback. No authenticated brokerage/exchange endpoints, wallets, API credentials, or live-order routes are introduced.
+
 ## Important readiness boundary
 
 This remains a paper-trading research project, not a certified production trading service. Before relying on it for unattended testing, run the full tests and Windows smoke test locally, review the provider's API terms/rate limits, and monitor the app during a long paper session. No profitability is implied. Live trading, exchange credentials, wallets, and real order execution are deliberately out of scope.
