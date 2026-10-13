@@ -89,13 +89,16 @@ class MultiMarketPaperTests(unittest.TestCase):
         main.set_multi_market_setting("auto_enabled", True)
         candles = [{"timestamp": "2026-01-01T00:00:00+00:00", "close": 2.0}] * 40
         signal = {"signal": "BUY", "score": 0.40, "regime": "trending", "reason": "test"}
-        with patch.object(main, "multi_market_instruments", return_value={
-            "provider_status": "fresh",
-            "items": [{"symbol": "STKAAPL", "market_type": "stocks"}],
-        }), patch.object(main, "multi_market_candles", return_value=candles), \\
-             patch.object(main, "combined_signal", return_value=signal), \\
-             patch.object(main, "build_trade_plan", return_value={"available": True}), \\
-             patch.object(main, "multi_market_order") as place_order:
+        with (
+            patch.object(main, "multi_market_instruments", return_value={
+                "provider_status": "fresh",
+                "items": [{"symbol": "STKAAPL", "market_type": "stocks"}],
+            }),
+            patch.object(main, "multi_market_candles", return_value=candles),
+            patch.object(main, "combined_signal", return_value=signal),
+            patch.object(main, "build_trade_plan", return_value={"available": True}),
+            patch.object(main, "multi_market_order") as place_order,
+        ):
             result = main.multi_market_auto_cycle("stocks", 1)
         self.assertEqual(result["paper_fills"], 0)
         self.assertEqual(result["actions"][0]["status"], "no_action")
