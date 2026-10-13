@@ -44,8 +44,6 @@ YAHOO_SYMBOLS = {
         "IDXSP500": ("^GSPC", "S&P 500"),
         "IDXNASDAQ": ("^IXIC", "NASDAQ Composite"),
         "IDXDOW": ("^DJI", "Dow Jones Industrial Average"),
-        "IDXNIFTY": ("^NSEI", "NIFTY 50"),
-        "IDXSENSEX": ("^BSESN", "BSE SENSEX"),
     },
 }
 MARKET_TYPES = {
@@ -70,12 +68,12 @@ def _utc(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
-def _json(url: str, timeout: float = 7):
+def _json(url: str, timeout: float = 7, opener=urlopen):
     request = Request(url, headers={
         "Accept": "application/json",
         "User-Agent": "multichain-paper-agent/1.0",
     })
-    with urlopen(request, timeout=timeout) as response:
+    with opener(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode("utf-8"))
     return payload
 
@@ -212,7 +210,7 @@ class PublicMultiMarketProvider:
             "order": "volume24hr", "ascending": "false",
         })
         try:
-            payload = _json(url, self.timeout_seconds)
+            payload = _json(url, self.timeout_seconds, self.opener)
         except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
             raise MarketDataError(f"Prediction-market provider unavailable ({type(exc).__name__}).") from exc
         if not isinstance(payload, list):
