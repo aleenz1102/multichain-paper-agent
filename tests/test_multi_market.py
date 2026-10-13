@@ -124,9 +124,9 @@ class MultiMarketPaperTests(unittest.TestCase):
                 "items": [{"symbol": "STKAAPL", "market_type": "stocks"}],
             }),
             patch.object(main, "multi_market_candles", return_value=candles),
-            patch.object(main, "multi_market_order", return_value={"trade_id": 2}),
-        ) as place_order:
-            result = main.multi_market_auto_cycle("stocks", 1)
+        ):
+            with patch.object(main, "multi_market_order", return_value={"trade_id": 2}) as place_order:
+                result = main.multi_market_auto_cycle("stocks", 1)
         self.assertEqual(result["actions"][0]["status"], "risk_exit_filled")
         self.assertEqual(result["actions"][0]["reason"], "stop_loss")
         order = place_order.call_args.args[0]
