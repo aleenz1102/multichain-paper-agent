@@ -31,7 +31,8 @@ class OrderRiskTests(unittest.TestCase):
 
     def test_missing_live_quote_blocks_order(self):
         main.set_setting("market_data_mode", "live_public")
-        with patch.object(main.live_provider, "get_prices", return_value={}):
+        with patch.object(main.universe_provider, "scan", return_value={"items": []}), \
+             patch.object(main.live_provider, "get_prices", return_value={}):
             with self.assertRaises(HTTPException) as error:
                 main.order(main.Order(symbol="SOL", side="BUY", amount=100))
         self.assertEqual(error.exception.status_code, 503)
@@ -121,7 +122,8 @@ class OrderRiskTests(unittest.TestCase):
     def test_missing_quote_marks_valuation_incomplete(self):
         main.order(main.Order(symbol="SOL", side="BUY", amount=1000))
         main.set_setting("market_data_mode", "live_public")
-        with patch.object(main.live_provider, "get_prices", return_value={}):
+        with patch.object(main.universe_provider, "scan", return_value={"items": []}), \
+             patch.object(main.live_provider, "get_prices", return_value={}):
             valuation = main.portfolio()
         self.assertFalse(valuation["valuation_complete"])
         self.assertIn("SOL", valuation["unpriced_positions"])
