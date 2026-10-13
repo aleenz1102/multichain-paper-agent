@@ -43,6 +43,10 @@ class MultiMarketPaperTests(unittest.TestCase):
     def test_separate_account_defaults_to_thirty_dollars_and_auto_off(self):
         cfg = main.multi_market_settings()
         self.assertEqual(cfg["virtual_cash_usd"], 30.0)
+        self.assertEqual(cfg["max_trade_pct"], 3.0)
+        self.assertEqual(cfg["max_positions"], 3)
+        self.assertEqual(cfg["max_drawdown_pct"], 8.0)
+        self.assertEqual(cfg["max_exposure_pct"], 30.0)
         self.assertFalse(cfg["auto_enabled"])
         self.assertFalse(cfg["paused"])
 
@@ -80,6 +84,23 @@ class MultiMarketPaperTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             main.multi_market_auto_run(main.MultiMarketAutoRunInput(market_type="stocks"))
         self.assertEqual(error.exception.status_code, 400)
+
+    def test_weak_buy_signal_is_blocked_by_auto_entry_gate(self):
+        main.set_multi_market_setting("auto_enabled", True)
+        candles = [{"timestamp": "2026-01-01T00:00:00+00:00", "close": 2.0}] * 40
+        signal = {"signal": "BUY", "score": 0.40, "regime": "trending", "reason": "test"}
+        with patch.object(main, "multi_market_instruments", return_value={
+            "provider_status": "fresh",
+            "items": [{"symbol": "STKAAPL", "market_type": "stocks"}],
+        }), patch.object(main, "multi_market_candles", return_value=candles), \\
+             patch.object(main, "combined_signal", return_value=signal), \\
+             patch.object(main, "build_trade_plan", return_value={"available": True}), \\
+             patch.object(main, "multi_market_order") as place_order:
+            result = main.multi_market_auto_cycle("stocks", 1)
+        self.assertEqual(result["paper_fills"], 0)
+        self.assertEqual(result["actions"][0]["status"], "no_action")
+        self.assertIn("score >= 0.45", result["actions"][0]["reason"])
+        place_order.assert_not_called()
 
     def test_market_catalog_is_paper_only(self):
         catalog = main.multi_market_catalog()
