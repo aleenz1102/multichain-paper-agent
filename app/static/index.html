@@ -309,7 +309,7 @@ async function runBacktest(symbol){
 }
 $('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
 </script></body></html>+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4});
-let mmSelectedItems=[];
+let mmSelectedItems=[];let mmInitialized=false;
 function mmPrice(x){
  if(x.market_type==='prediction')return num(Number(x.price||0)*100,2)+'%';
  const p=Number(x.price||0);
@@ -317,6 +317,14 @@ function mmPrice(x){
 }
 function mmSafeNum(n,d=2){return n===null||n===undefined?'—':num(n,d);}
 async function loadMultiMarket(){
+ try{
+  const saved=await api('/api/multi-market/settings');
+  if(!mmInitialized){
+   if(saved.selected_market)$('mmMarketType').value=saved.selected_market;
+   $('mmAutoEnabled').checked=!!saved.auto_enabled;
+   mmInitialized=true;
+  }
+ }catch(e){}
  const type=$('mmMarketType').value;
  $('mmStatus').textContent='Fetching '+type+' instruments from public market data...';
  try{
