@@ -58,7 +58,7 @@ MARKET_TYPES = {
 }
 YAHOO_INTERVAL = "15m"
 YAHOO_RANGE = "5d"
-FRESH_SECONDS = 180
+FRESH_SECONDS = 1800
 CACHE_SECONDS = 30
 
 
@@ -141,9 +141,15 @@ class PublicMultiMarketProvider:
         candles = []
         opens, highs, lows, closes = (block.get(k) or [] for k in ("open", "high", "low", "close"))
         volumes = block.get("volume") or []
+        now = time.time()
+        interval_seconds = 15 * 60
         for i, timestamp in enumerate(timestamps):
             if i >= len(closes):
                 break
+            # Only completed candles enter the strategy engine. Yahoo can include
+            # the currently-forming 15-minute bar in the latest chart response.
+            if float(timestamp) + interval_seconds > now:
+                continue
             close = _number(closes[i])
             op = _number(opens[i]) if i < len(opens) else None
             high = _number(highs[i]) if i < len(highs) else None
@@ -162,9 +168,9 @@ class PublicMultiMarketProvider:
             })
         if not candles:
             raise MarketDataError(f"No valid price candles returned for {ticker}.")
-        now = time.time()
         newest = datetime.fromisoformat(candles[-1]["timestamp"]).timestamp()
-        age = max(0.0, now - newest)
+        quote_timestamp = _number(meta.get("regularMarketTime")) or newest
+        age = max(0.0, now - quote_timestamp)
         meta_price = _number(meta.get("regularMarketPrice"))
         price = meta_price if meta_price and meta_price > 0 else candles[-1]["close"]
         previous = _number(meta.get("chartPreviousClose")) or _number(meta.get("previousClose"))
