@@ -297,7 +297,7 @@ def startup():
     _multi_market_scheduler = PaperAutoScheduler(
         enabled=lambda: bool(multi_market_settings().get("auto_enabled", False)),
         paused=lambda: bool(multi_market_settings().get("paused", False)),
-        run_cycle=lambda: multi_market_auto_cycle(),
+        run_cycle=lambda: multi_market_auto_cycle_all(max_symbols=2),
         audit=audit,
         interval_seconds=60,
     )
@@ -1072,12 +1072,16 @@ def metrics():
 # Independent USD-denominated multi-market paper account. The existing crypto
 # ledger and its stored balances are not rewritten or migrated by this feature.
 MULTI_MARKET_DEFAULTS = {
+    # Conservative paper-first defaults sized for a small $30 research account.
+    # Existing user settings remain untouched by INSERT OR IGNORE during startup.
     "virtual_cash_usd": 30.0, "fee_bps": 10.0, "slippage_bps": 8.0,
-    "max_trade_pct": 10.0, "daily_loss_limit_pct": 3.0,
-    "max_positions": 4, "paused": False, "auto_enabled": False,
-    "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0,
+    "max_trade_pct": 3.0, "daily_loss_limit_pct": 3.0,
+    "max_positions": 3, "paused": False, "auto_enabled": False,
+    "max_drawdown_pct": 8.0, "max_exposure_pct": 30.0,
     "high_water_equity_usd": 30.0, "selected_market": "crypto",
     "last_auto_candle_by_symbol": {},
+    "auto_position_risk": {},
+    "last_auto_cycle_summary": {},
 }
 _multi_market_quote_cache = {}
 _multi_market_quote_cache_lock = Lock()
@@ -1328,6 +1332,10 @@ def multi_market_order(order_input):
         )
         c.commit()
         trade_id = cursor.lastrowid
+    if side == "SELL" and qty >= current["qty"] * (1 - 1e-9):
+        risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+        risk_book.pop(market_type + ":" + symbol, None)
+        set_multi_market_setting("auto_position_risk", risk_book)
     audit("MULTI_MARKET_PAPER_ORDER_FILLED", {
         "trade_id": trade_id, "market_type": market_type, "symbol": symbol,
         "side": side, "qty": qty, "price": fill_price, "currency": "USD",
@@ -1382,7 +1390,24 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
     scan = multi_market_instruments(market_type, 100)
     if scan.get("provider_status") == "stale_cache":
         raise HTTPException(503, "Market scan is stale; paper cycle blocked.")
-    candidates = scan.get("items", [])[:max_symbols]
+    scan_items = scan.get("items", [])
+    risk_book = dict(cfg.get("auto_position_risk", {}) or {})
+    # Always service bot-managed positions first, even if an instrument falls out of the
+    # current top-movers/liquidity shortlist. Missing candles or quotes still block exits.
+    managed_symbols = [
+        key.split(":", 1)[1] for key in risk_book
+        if key.startswith(market_type + ":")
+    ]
+    by_symbol = {str(item.get("symbol", "")): item for item in scan_items}
+    candidates = [
+        by_symbol.get(symbol, {"symbol": symbol, "market_type": market_type})
+        for symbol in managed_symbols
+    ]
+    candidates.extend(
+        item for item in scan_items
+        if str(item.get("symbol", "")) not in set(managed_symbols)
+    )
+    candidates = candidates[:len(managed_symbols) + max_symbols]
     if not candidates:
         raise HTTPException(503, "No fresh instruments were returned; no paper cycle was executed.")
     last_seen = dict(cfg.get("last_auto_candle_by_symbol", {}) or {})
@@ -1391,14 +1416,70 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
         symbol = candidate["symbol"]
         try:
             candles = multi_market_candles(market_type, symbol)
-            if len(candles) < 30:
+            key = market_type + ":" + symbol
+            risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+            is_managed_position = key in risk_book
+            if not candles:
+                actions.append({"symbol": symbol, "status": "blocked", "reason": "No completed candle is available."})
+                continue
+            if len(candles) < 30 and not is_managed_position:
                 actions.append({"symbol": symbol, "status": "skipped", "reason": "Insufficient candle history."})
                 continue
             candle_ts = candles[-1].get("timestamp")
             if not candle_ts:
                 actions.append({"symbol": symbol, "status": "blocked", "reason": "Completed candle timestamp missing."})
                 continue
-            key = market_type + ":" + symbol
+            new_completed_candle = str(last_seen.get(key, "")) < str(candle_ts)
+            # Persisted bot-owned risk levels are evaluated every scheduler cycle using
+            # a fresh quote; completed-candle OHLC is a conservative fallback for gaps.
+            # If both levels cross within one candle, assume the stop filled first.
+            risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+            risk = risk_book.get(key)
+            if risk:
+                stop_price = float(risk["stop_loss"])
+                target_price = float(risk["take_profit"])
+                exit_reason = None
+                try:
+                    live_quote = multi_market_quote(market_type, symbol)
+                    live_price = float(live_quote["price"])
+                    if live_price <= stop_price:
+                        exit_reason = "stop_loss"
+                    elif live_price >= target_price:
+                        exit_reason = "take_profit"
+                except (HTTPException, KeyError, TypeError, ValueError):
+                    pass
+                if exit_reason is None and new_completed_candle:
+                    try:
+                        candle = candles[-1]
+                        candle_low = float(candle["low"])
+                        candle_high = float(candle["high"])
+                        entry_candle = str(risk.get("opened_candle_timestamp", ""))
+                        if not entry_candle or str(candle_ts) > entry_candle:
+                            exit_reason = ("stop_loss" if candle_low <= stop_price else
+                                           "take_profit" if candle_high >= target_price else None)
+                    except (KeyError, TypeError, ValueError):
+                        exit_reason = None
+                if exit_reason:
+                    try:
+                        result = multi_market_order(MultiMarketOrderInput(
+                            market_type=market_type, symbol=symbol, side="SELL",
+                            amount_usd=1.0, sell_percent=100,
+                        ))
+                        risk_book.pop(key, None)
+                        set_multi_market_setting("auto_position_risk", risk_book)
+                        actions.append({
+                            "symbol": symbol, "status": "risk_exit_filled",
+                            "reason": exit_reason, "trade_id": result["trade_id"],
+                        })
+                        last_seen[key] = str(candle_ts)
+                        set_multi_market_setting("last_auto_candle_by_symbol", last_seen)
+                        continue
+                    except HTTPException as exc:
+                        actions.append({
+                            "symbol": symbol, "status": "risk_exit_blocked",
+                            "reason": f"{exit_reason}: {exc.detail}",
+                        })
+                        continue
             if str(last_seen.get(key, "")) >= str(candle_ts):
                 actions.append({"symbol": symbol, "status": "skipped_duplicate_candle", "candle_timestamp": candle_ts})
                 continue
@@ -1406,18 +1487,42 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
             set_multi_market_setting("last_auto_candle_by_symbol", last_seen)
             signal = combined_signal(candles)
             side = str(signal.get("signal", "HOLD")).upper()
+            score = float(signal.get("score", 0.0) or 0.0)
+            regime = str(signal.get("regime", "uncertain"))
+            # A ticker ranking is not a trading signal. Entries require a stronger
+            # completed-candle signal, a trending regime, and a valid ATR risk plan.
+            if side == "BUY":
+                plan = build_trade_plan(candles, signal)
+                if score < 0.45 or regime != "trending" or not plan.get("available"):
+                    actions.append({
+                        "symbol": symbol, "signal": side, "score": score, "regime": regime,
+                        "status": "no_action",
+                        "reason": ("Entry gate: require score >= 0.45, trending regime, "
+                                   "and valid ATR stop/target estimates."),
+                    })
+                    continue
             if side not in ("BUY", "SELL") or (market_type == "prediction"):
-                actions.append({"symbol": symbol, "signal": side, "status": "no_action", "reason": signal.get("reason", "No trade signal.")})
+                actions.append({"symbol": symbol, "signal": side, "score": score, "regime": regime,
+                                "status": "no_action", "reason": signal.get("reason", "No trade signal.")})
                 continue
             if side == "SELL":
                 portfolio_value = multi_market_portfolio()
                 if not any(p["market_type"] == market_type and p["symbol"] == symbol for p in portfolio_value["positions"]):
                     actions.append({"symbol": symbol, "signal": side, "status": "no_position"})
                     continue
+                if key not in risk_book:
+                    actions.append({
+                        "symbol": symbol, "signal": side, "status": "no_action",
+                        "reason": "SELL signal does not liquidate a manual position; only bot-managed positions are auto-exited.",
+                    })
+                    continue
                 result = multi_market_order(MultiMarketOrderInput(
                     market_type=market_type, symbol=symbol, side="SELL",
                     amount_usd=1.0, sell_percent=100,
                 ))
+                risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+                risk_book.pop(market_type + ":" + symbol, None)
+                set_multi_market_setting("auto_position_risk", risk_book)
             else:
                 portfolio_value = multi_market_portfolio()
                 amount = min(portfolio_value["equity_usd"] * float(cfg["max_trade_pct"]) / 100,
@@ -1428,6 +1533,23 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
                 result = multi_market_order(MultiMarketOrderInput(
                     market_type=market_type, symbol=symbol, side="BUY", amount_usd=round(amount, 4),
                 ))
+                # Store a durable stop and first target only for bot-created entries.
+                # Rebase strategy levels on the simulated fill, preserving the ATR risk distance.
+                entry_reference = float(plan["entry_reference"])
+                stop_reference = float(plan["stop_loss"])
+                target_reference = float(plan["take_profit_1"])
+                fill = float(result["fill_price"])
+                risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+                risk_book[market_type + ":" + symbol] = {
+                    "entry_price": fill,
+                    "stop_loss": round(fill - (entry_reference - stop_reference), 10),
+                    "take_profit": round(fill + (target_reference - entry_reference), 10),
+                    "opened_at": now_iso(),
+                    "opened_candle_timestamp": str(candle_ts),
+                    "entry_trade_id": result["trade_id"],
+                    "method": "ATR stop / 1.5R target; stop-first if both levels cross within one candle",
+                }
+                set_multi_market_setting("auto_position_risk", risk_book)
             actions.append({"symbol": symbol, "signal": side, "status": "paper_filled", "trade_id": result["trade_id"]})
         except HTTPException as exc:
             actions.append({"symbol": symbol, "status": "blocked_by_risk_or_data", "reason": str(exc.detail)})
@@ -1440,6 +1562,41 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
             "live_trading": False, "orders_submitted": False,
             "evaluated": len(candidates), "paper_fills": sum(x.get("status") == "paper_filled" for x in actions),
             "actions": actions}
+
+
+def multi_market_auto_cycle_all(max_symbols: int = 2):
+    """Run a bounded paper-only scan across every category with validated auto support."""
+    cfg = multi_market_settings()
+    if not cfg.get("auto_enabled", False):
+        return {"status": "disabled", "mode": "PAPER_ONLY", "live_trading": False,
+                "market_cycles": [], "paper_fills": 0}
+    if cfg.get("paused", False):
+        return {"status": "paused", "mode": "PAPER_ONLY", "live_trading": False,
+                "market_cycles": [], "paper_fills": 0}
+    supported = [name for name, meta in MARKET_TYPES.items() if meta.get("auto_supported")]
+    market_cycles = []
+    for category in supported:
+        try:
+            result = multi_market_auto_cycle(category, max_symbols=max(1, min(int(max_symbols), 3)))
+            market_cycles.append(result)
+        except HTTPException as exc:
+            market_cycles.append({
+                "status": "blocked", "market_type": category, "paper_fills": 0,
+                "error": str(exc.detail),
+            })
+    fills = sum(int(cycle.get("paper_fills", 0) or 0) for cycle in market_cycles)
+    summary = {
+        "status": "completed" if market_cycles and all(c.get("status") == "completed" for c in market_cycles) else "partial",
+        "mode": "PAPER_ONLY", "live_trading": False, "orders_submitted": False,
+        "markets_scanned": len(market_cycles), "paper_fills": fills,
+        "market_cycles": market_cycles, "completed_at": now_iso(),
+    }
+    set_multi_market_setting("last_auto_cycle_summary", summary)
+    audit("MULTI_MARKET_AUTO_SWEEP", {
+        "markets_scanned": len(market_cycles), "paper_fills": fills,
+        "live_trading": False, "status": summary["status"],
+    })
+    return summary
 
 
 @app.get("/api/multi-market/catalog")
@@ -1504,6 +1661,9 @@ def multi_market_auto_status():
         "last_cycle_at": _multi_market_scheduler.last_cycle_at if _multi_market_scheduler else None,
         "last_cycle_status": _multi_market_scheduler.last_cycle_status if _multi_market_scheduler else "not_started",
         "last_cycle_error": _multi_market_scheduler.last_cycle_error if _multi_market_scheduler else None,
+        "managed_positions": len(multi_market_settings().get("auto_position_risk", {}) or {}),
+        "last_auto_cycle_summary": multi_market_settings().get("last_auto_cycle_summary", {}),
+        "automated_market_types": [name for name, meta in MARKET_TYPES.items() if meta.get("auto_supported")],
         "mode": "PAPER_ONLY", "live_trading": False,
     }
 
