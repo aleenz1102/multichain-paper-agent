@@ -16,6 +16,45 @@
 <div class="card" style="border-color:var(--amber)"><div class="label">Open positions</div><div class="value" id="poscount">0</div><div class="sub">Simulated holdings</div></div>
 <div class="card" style="border-color:var(--green)"><div class="label">Risk status</div><div class="value positive" id="riskStatus">SAFE</div><div class="sub">Backend-enforced limits</div></div>
 </section>
+<section class="card" id="multiMarketPanel">
+<div class="row spread"><div><h2>Multi-market paper terminal</h2><div class="small">Select a market to scan live public instruments and paper-trade using a separate $30 virtual USD account. Existing crypto portfolio/history is preserved.</div></div><span class="pill">PAPER ONLY · NO LIVE ORDERS</span></div>
+<div class="controls" style="margin-top:12px">
+ <div class="field"><label>Market</label><select id="mmMarketType">
+  <option value="crypto">Crypto · USDT spot</option><option value="stocks">Stocks</option><option value="forex">Forex · USD-quoted majors</option><option value="commodities">Commodities · futures references</option><option value="indices">Indices</option><option value="prediction">Prediction markets</option>
+ </select></div>
+ <div class="field"><label>Paper automation</label><label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="mmAutoEnabled" class="switch" type="checkbox"> Auto-paper selected market</label></div>
+ <div class="field"><label>Controls</label><div class="row"><button onclick="saveMultiMarketSettings()">Save / apply</button><button class="danger" onclick="pauseMultiMarket()">Pause</button><button class="safe" onclick="resumeMultiMarket()">Resume</button></div></div>
+</div>
+<div id="mmStatus" class="notice" style="margin-top:10px">Loading public market instruments...</div>
+<div class="stats" style="margin-top:10px">
+ <div class="card stat"><div class="label">Multi-market equity</div><div class="value" id="mmEquity">$30.00</div><div class="sub">Independent virtual USD account</div></div>
+ <div class="card"><div class="label">Available cash</div><div class="value" id="mmCash">$30.00</div><div class="sub">Virtual funds only</div></div>
+ <div class="card"><div class="label">Net paper P&amp;L</div><div class="value" id="mmPnL">$0.00</div><div class="sub" id="mmPnLPct">No simulated trades yet</div></div>
+ <div class="card"><div class="label">Open positions</div><div class="value" id="mmPositionCount">0</div><div class="sub" id="mmRiskStatus">Risk limits active</div></div>
+ <div class="card"><div class="label">Automation status</div><div class="value" id="mmAutoStatus">OFF</div><div class="sub" id="mmAutoCycles">Scheduler starts with the app</div></div>
+</div>
+<div class="layout" style="margin-top:12px">
+ <div class="card market-card" style="height:auto;min-height:360px">
+  <div class="row spread"><h2 id="mmInstrumentsTitle">Available instruments</h2><button onclick="loadMultiMarket()">Refresh market</button></div>
+  <div class="tablewrap" style="max-height:480px;min-height:180px;overflow:auto"><table><thead><tr><th>Instrument</th><th>Price</th><th>Change</th><th>Volume / activity</th><th>Data</th><th>Action</th></tr></thead><tbody id="mmInstrumentRows"><tr><td colspan="6">Loading...</td></tr></tbody></table></div>
+  <div class="small" id="mmProviderNote">Public data only. Unsupported or stale markets cannot be used for paper orders.</div>
+ </div>
+ <div class="side-stack">
+  <div class="card"><h2>Multi-market order ticket</h2><div class="notice">Independent USD-denominated paper ledger. Quotes are fetched server-side before a simulated fill.</div>
+   <div class="controls" style="margin-top:10px">
+    <div class="field"><label>Instrument</label><select id="mmSymbol"></select></div>
+    <div class="field"><label>Side</label><select id="mmSide"><option>BUY</option><option>SELL</option></select></div>
+    <div class="field"><label>USD notional</label><input id="mmAmount" type="number" min="0.1" step="0.1" value="3"></div>
+   </div>
+   <div class="row" style="margin-top:10px"><button class="safe" onclick="placeMultiMarketOrder()">Simulate order</button><button onclick="sellMultiMarketPercent(50)">Sell 50%</button><button onclick="sellMultiMarketPercent(100)">Sell all</button></div><div class="message" id="mmOrderMessage"></div>
+   <div class="small" style="margin-top:8px">Max trade: 10% default · Daily loss stop: 3% · Max drawdown: 10% · Max exposure: 60% · One market-independent $30 virtual USD balance shared by these categories.</div>
+  </div>
+  <div class="card"><h2>Cross-market positions</h2><div class="tablewrap" style="max-height:220px;min-height:60px;overflow:auto"><table><thead><tr><th>Market</th><th>Instrument</th><th>Qty</th><th>Mark</th><th>Unrealized P&amp;L</th></tr></thead><tbody id="mmPositions"><tr><td colspan="5">No positions</td></tr></tbody></table></div><div class="small" id="mmValuationStatus">Valuation pending.</div></div>
+  <div class="card"><h2>Recent multi-market trades</h2><div class="tablewrap" style="max-height:220px;min-height:60px;overflow:auto"><table><thead><tr><th>Time</th><th>Market</th><th>Instrument</th><th>Side</th><th>Price</th><th>P&amp;L</th></tr></thead><tbody id="mmTrades"><tr><td colspan="6">No paper trades</td></tr></tbody></table></div></div>
+ </div>
+</div>
+<div class="small" style="margin-top:10px">The prediction-market adapter supports live public probabilities and manual paper orders. Automated prediction-market trading is intentionally disabled until reliable historical candle data is available. Equity/forex/futures contracts are fractional reference units; this is a research simulation, not a broker statement.</div>
+</section>
 <section class="card"><div class="row spread"><div><h2>Today’s USDT setups</h2><div class="small">Liquidity-filtered candidates ranked with completed-candle signals. BUY requires a rule-based signal; no profit guarantee.</div></div><button onclick="loadDailyCandidates()">Rescan candidates</button></div><div id="candidateStatus" class="small" style="margin:8px 0">Scanning liquid USDT markets...</div><div class="tablewrap" style="max-height:300px;min-height:100px"><table><thead><tr><th>Pair</th><th>Signal</th><th>Score</th><th>24h change</th><th>Market regime</th><th>Reference trade plan</th><th>Why</th><th>Action</th></tr></thead><tbody id="candidateRows"><tr><td colspan="8">Waiting for live scan...</td></tr></tbody></table></div></section>
 <section class="layout">
 <section class="card" id="moversCard"><h2>TOP MOVERS | USDT SPOT</h2>
@@ -248,6 +287,146 @@ async function loadMovers(mode='gainers'){
  }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
 }
 $('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);loadMovers('gainers');setInterval(()=>loadMovers(moversMode),60000);
+
+const mmUsd=n=>'</body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
+ }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
+ }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
+}
+async function runBacktest(symbol){
+ $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
+ try{
+  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
+  const w=d.windows;
+  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
+   '\\nValidation-selected strategy: '+d.selected_strategy+
+   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
+   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
+   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
+   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
+   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
+   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
+ }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
+}
+$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
+</script></body></html>+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4});
+let mmSelectedItems=[];
+function mmPrice(x){
+ if(x.market_type==='prediction')return num(Number(x.price||0)*100,2)+'%';
+ const p=Number(x.price||0);
+ return p>=1000?num(p,2):p>=1?num(p,4):num(p,8);
+}
+function mmSafeNum(n,d=2){return n===null||n===undefined?'—':num(n,d);}
+async function loadMultiMarket(){
+ const type=$('mmMarketType').value;
+ $('mmStatus').textContent='Fetching '+type+' instruments from public market data...';
+ try{
+  const d=await api('/api/multi-market/instruments?market_type='+encodeURIComponent(type)+'&limit=30');
+  mmSelectedItems=d.items||[];
+  $('mmInstrumentsTitle').textContent=(d.label||type)+' · '+mmSelectedItems.length+' instruments';
+  $('mmStatus').textContent=(d.provider_status||'unknown')+' · '+(d.provider||'public provider')+' · '+(d.scanned_at?new Date(d.scanned_at).toLocaleTimeString():'timestamp unavailable');
+  $('mmProviderNote').textContent=d.warning||'Public-data only. No live orders.';
+  $('mmInstrumentRows').innerHTML=mmSelectedItems.map(x=>{
+   const ch=x.change_pct===null||x.change_pct===undefined?'—':((Number(x.change_pct)>0?'+':'')+num(x.change_pct,2)+'%');
+   const vol=Number(x.volume||0);
+   const activity=x.market_type==='crypto'||x.market_type==='stocks'?('</body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
+ }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
+ }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
+}
+async function runBacktest(symbol){
+ $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
+ try{
+  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
+  const w=d.windows;
+  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
+   '\\nValidation-selected strategy: '+d.selected_strategy+
+   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
+   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
+   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
+   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
+   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
+   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
+ }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
+}
+$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
+</script></body></html>+num(vol,0)):(x.market_type==='prediction'?('</body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
+ }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
+ }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
+}
+async function runBacktest(symbol){
+ $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
+ try{
+  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
+  const w=d.windows;
+  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
+   '\\nValidation-selected strategy: '+d.selected_strategy+
+   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
+   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
+   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
+   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
+   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
+   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
+ }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
+}
+$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
+</script></body></html>+num(vol,0)):'—');
+   const status=x.data_status==='LIVE PUBLIC PRICE'?'LIVE':'WATCH ONLY';
+   return '<tr><td><strong>'+esc(x.display_symbol||x.symbol)+'</strong><div class="small">'+esc(x.name||'')+'</div></td><td>'+mmPrice(x)+' <span class="small">'+esc(x.currency||'USD')+'</span></td><td class="'+(Number(x.change_pct||0)>=0?'positive':'negative')+'">'+ch+'</td><td>'+activity+'</td><td><span class="pill '+(status==='LIVE'?'buy':'hold')+'">'+status+'</span></td><td><button onclick="selectMultiMarketInstrument(\''+esc(x.symbol)+'\')">Select</button></td></tr>';
+  }).join('')||'<tr><td colspan="6">No instruments returned by this provider.</td></tr>';
+  const prior=$('mmSymbol').value;
+  $('mmSymbol').innerHTML=mmSelectedItems.map(x=>'<option value="'+esc(x.symbol)+'">'+esc(x.display_symbol||x.symbol)+'</option>').join('');
+  if(mmSelectedItems.some(x=>x.symbol===prior))$('mmSymbol').value=prior;
+  const s=await api('/api/multi-market/portfolio');
+  $('mmEquity').textContent=mmUsd(s.equity_usd);$('mmCash').textContent=mmUsd(s.virtual_cash_usd);
+  $('mmPnL').textContent=mmUsd(s.net_pnl_usd);$('mmPnL').className='value '+(s.net_pnl_usd>0?'positive':s.net_pnl_usd<0?'negative':'');
+  $('mmPnLPct').textContent='Realized '+mmUsd(s.realized_pnl_usd)+' · unrealized '+mmUsd(s.unrealized_pnl_usd);
+  $('mmPositionCount').textContent=String(s.position_count||0);
+  $('mmRiskStatus').textContent=s.valuation_complete?'Risk limits active':'ENTRIES BLOCKED · quote missing';
+  $('mmPositions').innerHTML=(s.positions||[]).map(p=>'<tr><td>'+esc(p.market_type)+'</td><td>'+esc(p.display_symbol||p.symbol)+'</td><td>'+num(p.qty,6)+'</td><td>'+(p.mark_price===null?'—':mmPrice({market_type:p.market_type,price:p.mark_price}))+'</td><td class="'+(Number(p.unrealized_pnl||0)>=0?'positive':'negative')+'">'+(p.unrealized_pnl===null?'—':mmUsd(p.unrealized_pnl))+'</td></tr>').join('')||'<tr><td colspan="5">No open positions</td></tr>';
+  $('mmValuationStatus').textContent=s.valuation_complete?'All open positions have fresh quote marks.':'Unpriced positions: '+(s.unpriced_positions||[]).join(', ')+'. New BUYs are blocked.';
+  const [trades,auto]=await Promise.all([api('/api/multi-market/trades'),api('/api/multi-market/auto/status')]);
+  $('mmTrades').innerHTML=trades.map(t=>'<tr><td>'+esc(String(t.ts||'').replace('T',' ').slice(0,16))+'</td><td>'+esc(t.market_type)+'</td><td>'+esc(t.display_symbol||t.symbol)+'</td><td class="'+(t.side==='BUY'?'positive':'negative')+'">'+esc(t.side)+'</td><td>'+mmUsd(t.price)+'</td><td>'+mmUsd(t.realized_pnl)+'</td></tr>').join('')||'<tr><td colspan="6">No paper trades</td></tr>';
+  $('mmAutoStatus').textContent=auto.enabled?(auto.paused?'PAUSED':'ON'):'OFF';
+  $('mmAutoCycles').textContent='Cycles '+auto.cycles_completed+' done / '+auto.cycles_failed+' failed';
+  if(type==='prediction'&&$('mmAutoEnabled').checked){$('mmAutoEnabled').checked=false;}
+ }catch(e){
+  $('mmStatus').textContent='Market data unavailable: '+e.message;
+  $('mmInstrumentRows').innerHTML='<tr><td colspan="6" class="negative">No fresh public data. Paper actions are unavailable until the feed recovers.</td></tr>';
+ }
+}
+function selectMultiMarketInstrument(symbol){$('mmSymbol').value=symbol;$('mmOrderMessage').textContent='Selected '+symbol+' for the '+$('mmMarketType').value+' paper ticket.';}
+async function saveMultiMarketSettings(){
+ try{
+  const type=$('mmMarketType').value;
+  const auto=type==='prediction'?false:$('mmAutoEnabled').checked;
+  const s=await api('/api/multi-market/settings',{method:'PATCH',body:JSON.stringify({selected_market:type,auto_enabled:auto})});
+  $('mmAutoEnabled').checked=!!s.auto_enabled;
+  $('mmOrderMessage').textContent='Multi-market settings saved. Paper-only mode remains active.';
+  await loadMultiMarket();
+ }catch(e){$('mmOrderMessage').textContent=e.message;await loadMultiMarket();}
+}
+async function placeMultiMarketOrder(sellPercent=null){
+ try{
+  const payload={market_type:$('mmMarketType').value,symbol:$('mmSymbol').value,side:$('mmSide').value,amount_usd:Number($('mmAmount').value)};
+  if(sellPercent!==null){payload.side='SELL';payload.sell_percent=sellPercent;}
+  const d=await api('/api/multi-market/orders',{method:'POST',body:JSON.stringify(payload)});
+  $('mmOrderMessage').textContent=d.message+' '+d.side+' '+d.symbol+' · qty '+num(d.qty,8)+' · fill '+mmUsd(d.fill_price);
+  await loadMultiMarket();
+ }catch(e){$('mmOrderMessage').textContent=e.message;}
+}
+function sellMultiMarketPercent(percent){$('mmSide').value='SELL';return placeMultiMarketOrder(percent);}
+async function pauseMultiMarket(){try{await api('/api/multi-market/pause',{method:'POST'});$('mmOrderMessage').textContent='Multi-market paper trading paused.';await loadMultiMarket();}catch(e){$('mmOrderMessage').textContent=e.message;}}
+async function resumeMultiMarket(){try{await api('/api/multi-market/resume',{method:'POST'});$('mmOrderMessage').textContent='Multi-market paper trading resumed. Auto-paper still follows the ON/OFF setting.';await loadMultiMarket();}catch(e){$('mmOrderMessage').textContent=e.message;}}
+$('mmMarketType').addEventListener('change',async()=>{
+ try{
+  const type=$('mmMarketType').value;
+  if(type==='prediction')$('mmAutoEnabled').checked=false;
+  await api('/api/multi-market/settings',{method:'PATCH',body:JSON.stringify({selected_market:type,auto_enabled:type==='prediction'?false:$('mmAutoEnabled').checked})});
+  await loadMultiMarket();
+ }catch(e){$('mmStatus').textContent=e.message;}
+});
+$('mmAutoEnabled').addEventListener('change',saveMultiMarketSettings);
+
+loadMultiMarket();setInterval(loadMultiMarket,30000);
 </script></body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
  }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
  }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
