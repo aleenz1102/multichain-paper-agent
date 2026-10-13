@@ -113,15 +113,21 @@ def audit(event, detail):
         c.execute("INSERT INTO audit(ts,event,detail) VALUES(?,?,?)",(now_iso(),event,json.dumps(detail)))
         c.commit()
 def market():
-    """Return one selected quote source; never silently mix live and synthetic prices."""
+    """Return live USDT scanner data when available; otherwise preserve fail-closed legacy quote checks.
+
+    The dynamic universe is the source of truth for supported USDT pairs. If the
+    scanner is unavailable, do not present synthetic prices as live; retain known
+    assets with missing prices so orders/portfolio valuation fail closed.
+    """
     if settings().get("market_data_mode", "synthetic") == "live_public":
-        # Share one fresh public USDT universe across scanner, ticket, and valuation.
+        known = {a["symbol"]: a for a in ASSETS if a["symbol"] != "USDC"}
         try:
-            live_rows = universe_provider.scan(limit=100, min_quote_volume=2_000_000).get("items", [])
+            scan = universe_provider.scan(limit=100, min_quote_volume=2_000_000)
+            live_rows = scan.get("items", [])
         except Exception:
             live_rows = []
-        known = {a["symbol"]: a for a in ASSETS if a["symbol"] != "USDC"}
         output = []
+        seen = set()
         for row in live_rows:
             symbol = str(row.get("symbol", "")).upper()
             price = row.get("price_usdt")
@@ -140,6 +146,34 @@ def market():
                 "quote_volume_24h_usdt": float(row.get("quote_volume_24h_usdt", 0)),
                 "trades_24h": int(row.get("trades_24h", 0)),
             })
+            seen.add(symbol)
+        # Keep previously supported coins visible as unavailable if the USDT
+        # scanner cannot provide them; this makes held positions explicitly
+        # unvalued rather than dropping them or substituting demo prices.
+        if not output:
+            try:
+                legacy_prices = live_provider.get_prices(list(known))
+            except Exception:
+                legacy_prices = {}
+            for symbol, asset in known.items():
+                item = legacy_prices.get(symbol)
+                fresh = item is not None and item.status == "fresh" and item.price is not None
+                output.append({
+                    **asset,
+                    "price": float(item.price) if fresh else None,
+                    "change_pct": None, "signal": "HOLD", "signal_strength": 0.0,
+                    "data_status": "LIVE PUBLIC PRICE" if fresh else
+                        ("UNAVAILABLE" if item is None or item.status == "unavailable" else "STALE"),
+                })
+        elif "SOL" not in seen or "ETH" not in seen or "ARB" not in seen or "BNB" not in seen:
+            # Required strategy assets are represented as unavailable if they
+            # fall below the scanner's liquidity threshold; never invent prices.
+            for symbol in ("SOL", "ETH", "ARB", "BNB"):
+                if symbol not in seen:
+                    asset = known[symbol]
+                    output.append({**asset, "price": None, "change_pct": None,
+                                   "signal": "HOLD", "signal_strength": 0.0,
+                                   "data_status": "UNAVAILABLE"})
         return output
     tick = int(time.time() // 20)
     output = []
