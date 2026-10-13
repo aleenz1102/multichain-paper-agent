@@ -297,7 +297,7 @@ def startup():
     _multi_market_scheduler = PaperAutoScheduler(
         enabled=lambda: bool(multi_market_settings().get("auto_enabled", False)),
         paused=lambda: bool(multi_market_settings().get("paused", False)),
-        run_cycle=lambda: multi_market_auto_cycle(),
+        run_cycle=lambda: multi_market_auto_cycle_all(max_symbols=2),
         audit=audit,
         interval_seconds=60,
     )
@@ -1524,6 +1524,41 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
             "actions": actions}
 
 
+def multi_market_auto_cycle_all(max_symbols: int = 2):
+    """Run a bounded paper-only scan across every category with validated auto support."""
+    cfg = multi_market_settings()
+    if not cfg.get("auto_enabled", False):
+        return {"status": "disabled", "mode": "PAPER_ONLY", "live_trading": False,
+                "market_cycles": [], "paper_fills": 0}
+    if cfg.get("paused", False):
+        return {"status": "paused", "mode": "PAPER_ONLY", "live_trading": False,
+                "market_cycles": [], "paper_fills": 0}
+    supported = [name for name, meta in MARKET_TYPES.items() if meta.get("auto_supported")]
+    market_cycles = []
+    for category in supported:
+        try:
+            result = multi_market_auto_cycle(category, max_symbols=max(1, min(int(max_symbols), 3)))
+            market_cycles.append(result)
+        except HTTPException as exc:
+            market_cycles.append({
+                "status": "blocked", "market_type": category, "paper_fills": 0,
+                "error": str(exc.detail),
+            })
+    fills = sum(int(cycle.get("paper_fills", 0) or 0) for cycle in market_cycles)
+    summary = {
+        "status": "completed" if market_cycles and all(c.get("status") == "completed" for c in market_cycles) else "partial",
+        "mode": "PAPER_ONLY", "live_trading": False, "orders_submitted": False,
+        "markets_scanned": len(market_cycles), "paper_fills": fills,
+        "market_cycles": market_cycles, "completed_at": now_iso(),
+    }
+    set_multi_market_setting("last_auto_cycle_summary", summary)
+    audit("MULTI_MARKET_AUTO_SWEEP", {
+        "markets_scanned": len(market_cycles), "paper_fills": fills,
+        "live_trading": False, "status": summary["status"],
+    })
+    return summary
+
+
 @app.get("/api/multi-market/catalog")
 def multi_market_catalog():
     cfg = multi_market_settings()
@@ -1586,6 +1621,9 @@ def multi_market_auto_status():
         "last_cycle_at": _multi_market_scheduler.last_cycle_at if _multi_market_scheduler else None,
         "last_cycle_status": _multi_market_scheduler.last_cycle_status if _multi_market_scheduler else "not_started",
         "last_cycle_error": _multi_market_scheduler.last_cycle_error if _multi_market_scheduler else None,
+        "managed_positions": len(multi_market_settings().get("auto_position_risk", {}) or {}),
+        "last_auto_cycle_summary": multi_market_settings().get("last_auto_cycle_summary", {}),
+        "automated_market_types": [name for name, meta in MARKET_TYPES.items() if meta.get("auto_supported")],
         "mode": "PAPER_ONLY", "live_trading": False,
     }
 
