@@ -266,56 +266,45 @@ async function refreshIntelligence(){
 }
 let moversMode='gainers';
 async function loadMovers(mode='gainers'){
- moversMode=mode;const labels={gainers:'Top 24h gainers',losers:'Top 24h losers',volatile:'Largest 24h ranges'};
+ moversMode=mode;
+ const labels={gainers:'Top 24h gainers',losers:'Top 24h losers',volatile:'Largest 24h ranges'};
  $('moversStatus').textContent='Refreshing '+labels[mode]+' from public USDT spot markets...';
- try{const d=await api('/api/intelligence/movers?limit=20&min_quote_volume_usdt=2000000'),items=d[mode]||[];
- $('moversStatus').textContent=labels[mode]+' | '+items.length+' liquid pairs | '+(d.provider_status||'unknown')+' | '+(d.scanned_at?new Date(d.scanned_at).toLocaleTimeString():'time unknown');
- $('moversRows').innerHTML=items.map(x=>{const sym=String(x.symbol||'').replace(/USDT$/,''),ch=Number(x.change_24h_pct||0);
- return '<tr><td><strong>'+esc(sym)+'/USDT</strong></td><td>
- $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
  try{
-  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
-  const w=d.windows;
-  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
-   '\\nValidation-selected strategy: '+d.selected_strategy+
-   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
-   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
-   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
-   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
-   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
-   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
- }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
-}
-$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);loadMovers('gainers');setInterval(()=>loadMovers(moversMode),60000);
-
-const mmUsd=n=>'</body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
- }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
- }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
+  const d=await api('/api/intelligence/movers?limit=20&min_quote_volume_usdt=2000000');
+  const items=d[mode]||[];
+  $('moversStatus').textContent=labels[mode]+' | '+items.length+' liquid pairs | '+(d.provider_status||'unknown')+' | '+(d.scanned_at?new Date(d.scanned_at).toLocaleTimeString():'time unknown');
+  $('moversRows').innerHTML=items.map(x=>{
+   const sym=String(x.symbol||'').replace(/USDT$/,'');
+   const ch=Number(x.change_24h_pct||0);
+   return '<tr><td><strong>'+esc(sym)+'/USDT</strong></td><td>$'+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+num(x.quote_volume_24h_usdt,0)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
+  }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
+ }catch(e){
+  $('moversStatus').textContent='Movers unavailable: '+e.message;
+  $('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';
+ }
 }
 async function runBacktest(symbol){
  $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
  try{
   const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
-  const w=d.windows;
-  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
-   '\\nValidation-selected strategy: '+d.selected_strategy+
-   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
-   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
-   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
-   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
-   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
-   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
+  const w=d.windows||{};
+  $('backtestResult').textContent=symbol+' | '+d.candle_count+' candles | '+d.data_source+
+   '\nValidation-selected strategy: '+d.selected_strategy+
+   '\nTrain return: '+w.train?.return_pct+'% | Max DD: '+w.train?.max_drawdown_pct+'%'+
+   '\nValidation return: '+w.validation?.return_pct+'% | Max DD: '+w.validation?.max_drawdown_pct+'%'+
+   '\nUntouched test return: '+w.test?.return_pct+'% | Max DD: '+w.test?.max_drawdown_pct+'%'+
+   '\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
+   '\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
+   '\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\n'+(d.warning||'Research only; no orders submitted.');
  }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
 }
-$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
-</script></body></html>+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4});
-let mmSelectedItems=[];let mmInitialized=false;
+const mmUsd=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4});
+let mmSelectedItems=[],mmInitialized=false;
 function mmPrice(x){
  if(x.market_type==='prediction')return num(Number(x.price||0)*100,2)+'%';
  const p=Number(x.price||0);
  return p>=1000?num(p,2):p>=1?num(p,4):num(p,8);
 }
-function mmSafeNum(n,d=2){return n===null||n===undefined?'—':num(n,d);}
 async function loadMultiMarket(){
  try{
   const saved=await api('/api/multi-market/settings');
@@ -324,61 +313,19 @@ async function loadMultiMarket(){
    $('mmAutoEnabled').checked=!!saved.auto_enabled;
    mmInitialized=true;
   }
- }catch(e){}
- const type=$('mmMarketType').value;
- $('mmStatus').textContent='Fetching '+type+' instruments from public market data...';
- try{
+  const type=$('mmMarketType').value;
+  $('mmStatus').textContent='Fetching '+type+' instruments from public market data...';
   const d=await api('/api/multi-market/instruments?market_type='+encodeURIComponent(type)+'&limit=30');
   mmSelectedItems=d.items||[];
   $('mmInstrumentsTitle').textContent=(d.label||type)+' · '+mmSelectedItems.length+' instruments';
   $('mmStatus').textContent=(d.provider_status||'unknown')+' · '+(d.provider||'public provider')+' · '+(d.scanned_at?new Date(d.scanned_at).toLocaleTimeString():'timestamp unavailable');
-  $('mmProviderNote').textContent=d.warning||'Public-data only. No live orders.';
+  $('mmProviderNote').textContent=d.warning||'Public data only. No live orders.';
   $('mmInstrumentRows').innerHTML=mmSelectedItems.map(x=>{
    const ch=x.change_pct===null||x.change_pct===undefined?'—':((Number(x.change_pct)>0?'+':'')+num(x.change_pct,2)+'%');
    const vol=Number(x.volume||0);
-   const activity=x.market_type==='crypto'||x.market_type==='stocks'?('</body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
- }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
- }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
-}
-async function runBacktest(symbol){
- $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
- try{
-  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
-  const w=d.windows;
-  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
-   '\\nValidation-selected strategy: '+d.selected_strategy+
-   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
-   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
-   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
-   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
-   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
-   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
- }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
-}
-$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
-</script></body></html>+num(vol,0)):(x.market_type==='prediction'?('</body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
- }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
- }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
-}
-async function runBacktest(symbol){
- $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
- try{
-  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
-  const w=d.windows;
-  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
-   '\\nValidation-selected strategy: '+d.selected_strategy+
-   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
-   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
-   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
-   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
-   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
-   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
- }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
-}
-$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
-</script></body></html>+num(vol,0)):'—');
-   const status=x.data_status==='LIVE PUBLIC PRICE'?'LIVE':'WATCH ONLY';
-   return '<tr><td><strong>'+esc(x.display_symbol||x.symbol)+'</strong><div class="small">'+esc(x.name||'')+'</div></td><td>'+mmPrice(x)+' <span class="small">'+esc(x.currency||'USD')+'</span></td><td class="'+(Number(x.change_pct||0)>=0?'positive':'negative')+'">'+ch+'</td><td>'+activity+'</td><td><span class="pill '+(status==='LIVE'?'buy':'hold')+'">'+status+'</span></td><td><button onclick="selectMultiMarketInstrument(\''+esc(x.symbol)+'\')">Select</button></td></tr>';
+   const activity=x.market_type==='crypto'||x.market_type==='stocks'?num(vol,0):x.market_type==='prediction'?num(vol,0):'—';
+   const live=x.data_status==='LIVE PUBLIC PRICE';
+   return '<tr><td><strong>'+esc(x.display_symbol||x.symbol)+'</strong><div class="small">'+esc(x.name||'')+'</div></td><td>'+mmPrice(x)+' <span class="small">'+esc(x.currency||'USD')+'</span></td><td class="'+(Number(x.change_pct||0)>=0?'positive':'negative')+'">'+ch+'</td><td>'+activity+'</td><td><span class="pill '+(live?'buy':'hold')+'">'+(live?'LIVE':'WATCH ONLY')+'</span></td><td><button onclick="selectMultiMarketInstrument(\''+esc(x.symbol)+'\')">Select</button></td></tr>';
   }).join('')||'<tr><td colspan="6">No instruments returned by this provider.</td></tr>';
   const prior=$('mmSymbol').value;
   $('mmSymbol').innerHTML=mmSelectedItems.map(x=>'<option value="'+esc(x.symbol)+'">'+esc(x.display_symbol||x.symbol)+'</option>').join('');
@@ -395,7 +342,7 @@ $('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>
   $('mmTrades').innerHTML=trades.map(t=>'<tr><td>'+esc(String(t.ts||'').replace('T',' ').slice(0,16))+'</td><td>'+esc(t.market_type)+'</td><td>'+esc(t.display_symbol||t.symbol)+'</td><td class="'+(t.side==='BUY'?'positive':'negative')+'">'+esc(t.side)+'</td><td>'+mmUsd(t.price)+'</td><td>'+mmUsd(t.realized_pnl)+'</td></tr>').join('')||'<tr><td colspan="6">No paper trades</td></tr>';
   $('mmAutoStatus').textContent=auto.enabled?(auto.paused?'PAUSED':'ON'):'OFF';
   $('mmAutoCycles').textContent='Cycles '+auto.cycles_completed+' done / '+auto.cycles_failed+' failed';
-  if(type==='prediction'&&$('mmAutoEnabled').checked){$('mmAutoEnabled').checked=false;}
+  if(type==='prediction'&&$('mmAutoEnabled').checked)$('mmAutoEnabled').checked=false;
  }catch(e){
   $('mmStatus').textContent='Market data unavailable: '+e.message;
   $('mmInstrumentRows').innerHTML='<tr><td colspan="6" class="negative">No fresh public data. Paper actions are unavailable until the feed recovers.</td></tr>';
@@ -433,26 +380,10 @@ $('mmMarketType').addEventListener('change',async()=>{
  }catch(e){$('mmStatus').textContent=e.message;}
 });
 $('mmAutoEnabled').addEventListener('change',saveMultiMarketSettings);
-
 loadMultiMarket();setInterval(loadMultiMarket,30000);
-</script></body></html>+num(x.price_usdt,8)+'</td><td class="'+(ch>=0?'positive':'negative')+'">'+(ch>0?'+':'')+num(ch,2)+'%</td><td>'+money(x.quote_volume_24h_usdt)+'</td><td>'+num(x.range_24h_pct,2)+'%</td><td><button onclick="selectMarket(\''+esc(sym)+'\');quick(\''+esc(sym)+'\',\'BUY\')">Select / ticket</button></td></tr>';
- }).join('')||'<tr><td colspan="6">No eligible movers returned.</td></tr>';
- }catch(e){$('moversStatus').textContent='Movers unavailable: '+e.message;$('moversRows').innerHTML='<tr><td colspan="6" class="negative">Live scan unavailable; no stale values are fabricated.</td></tr>';}
-}
-async function runBacktest(symbol){
- $('backtestResult').textContent='Fetching completed candles and running chronological train/validation/test backtest for '+symbol+'...';
- try{
-  const d=await api('/api/research/walk-forward/'+encodeURIComponent(symbol),{method:'POST'});
-  const w=d.windows;
-  $('backtestResult').textContent=symbol+'  |  '+d.candle_count+' candles  |  '+d.data_source+
-   '\\nValidation-selected strategy: '+d.selected_strategy+
-   '\\nTrain return: '+w.train.return_pct+'% | Max DD: '+w.train.max_drawdown_pct+'%'+
-   '\\nValidation return: '+w.validation.return_pct+'% | Max DD: '+w.validation.max_drawdown_pct+'%'+
-   '\\nUntouched test return: '+w.test.return_pct+'% | Max DD: '+w.test.max_drawdown_pct+'%'+
-   '\\nCost-aware buy-and-hold benchmark: '+(w.test_buy_and_hold_benchmark?.return_pct??'n/a')+'% | Max DD: '+(w.test_buy_and_hold_benchmark?.max_drawdown_pct??'n/a')+'%'+
-   '\\nExcess return vs benchmark: '+(d.test_excess_return_vs_buy_and_hold_pct_points??'n/a')+' percentage points'+
-   '\\nTest profitable after costs: '+d.test_is_profitable_after_costs+' | Beat benchmark: '+d.test_outperformed_buy_and_hold_after_costs+'\\n'+d.warning;
- }catch(e){$('backtestResult').textContent='Backtest unavailable: '+e.message;}
-}
-$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL'},1000);setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
+$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';
+setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL',1000);
+setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();
+setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
+loadMovers('gainers');setInterval(()=>loadMovers(moversMode),60000);
 </script></body></html>
