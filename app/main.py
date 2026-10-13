@@ -1080,6 +1080,8 @@ MULTI_MARKET_DEFAULTS = {
     "max_drawdown_pct": 8.0, "max_exposure_pct": 30.0,
     "high_water_equity_usd": 30.0, "selected_market": "crypto",
     "last_auto_candle_by_symbol": {},
+    "auto_position_risk": {},
+    "last_auto_cycle_summary": {},
 }
 _multi_market_quote_cache = {}
 _multi_market_quote_cache_lock = Lock()
@@ -1404,6 +1406,45 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
             if str(last_seen.get(key, "")) >= str(candle_ts):
                 actions.append({"symbol": symbol, "status": "skipped_duplicate_candle", "candle_timestamp": candle_ts})
                 continue
+            # Persisted bot-owned risk levels are evaluated before any new entry.
+            # If stop and target are both crossed inside one candle, assume the stop filled first.
+            risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+            risk = risk_book.get(key)
+            if risk:
+                try:
+                    candle = candles[-1]
+                    candle_low = float(candle["low"])
+                    candle_high = float(candle["high"])
+                    stop_price = float(risk["stop_loss"])
+                    target_price = float(risk["take_profit"])
+                    exit_reason = ("stop_loss" if candle_low <= stop_price else
+                                   "take_profit" if candle_high >= target_price else None)
+                except (KeyError, TypeError, ValueError):
+                    exit_reason = None
+                if exit_reason:
+                    try:
+                        result = multi_market_order(MultiMarketOrderInput(
+                            market_type=market_type, symbol=symbol, side="SELL",
+                            amount_usd=1.0, sell_percent=100,
+                        ))
+                        risk_book.pop(key, None)
+                        set_multi_market_setting("auto_position_risk", risk_book)
+                        actions.append({
+                            "symbol": symbol, "status": "risk_exit_filled",
+                            "reason": exit_reason, "trade_id": result["trade_id"],
+                        })
+                        last_seen[key] = str(candle_ts)
+                        set_multi_market_setting("last_auto_candle_by_symbol", last_seen)
+                        continue
+                    except HTTPException as exc:
+                        actions.append({
+                            "symbol": symbol, "status": "risk_exit_blocked",
+                            "reason": f"{exit_reason}: {exc.detail}",
+                        })
+                        continue
+            if str(last_seen.get(key, "")) >= str(candle_ts):
+                actions.append({"symbol": symbol, "status": "skipped_duplicate_candle", "candle_timestamp": candle_ts})
+                continue
             last_seen[key] = str(candle_ts)
             set_multi_market_setting("last_auto_candle_by_symbol", last_seen)
             signal = combined_signal(candles)
@@ -1445,6 +1486,22 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
                 result = multi_market_order(MultiMarketOrderInput(
                     market_type=market_type, symbol=symbol, side="BUY", amount_usd=round(amount, 4),
                 ))
+                # Store a durable stop and first target only for bot-created entries.
+                # Rebase strategy levels on the simulated fill, preserving the ATR risk distance.
+                entry_reference = float(plan["entry_reference"])
+                stop_reference = float(plan["stop_loss"])
+                target_reference = float(plan["take_profit_1"])
+                fill = float(result["fill_price"])
+                risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+                risk_book[market_type + ":" + symbol] = {
+                    "entry_price": fill,
+                    "stop_loss": round(fill - (entry_reference - stop_reference), 10),
+                    "take_profit": round(fill + (target_reference - entry_reference), 10),
+                    "opened_at": now_iso(),
+                    "entry_trade_id": result["trade_id"],
+                    "method": "ATR stop / 1.5R target; stop-first if both levels cross within one candle",
+                }
+                set_multi_market_setting("auto_position_risk", risk_book)
             actions.append({"symbol": symbol, "signal": side, "status": "paper_filled", "trade_id": result["trade_id"]})
         except HTTPException as exc:
             actions.append({"symbol": symbol, "status": "blocked_by_risk_or_data", "reason": str(exc.detail)})
