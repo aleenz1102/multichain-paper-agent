@@ -57,7 +57,7 @@ main>section:not(#multiMarketPanel){display:none!important}
  <div class="side-stack">
   <div class="card"><h2>Multi-market order ticket</h2><div class="notice">Independent USD-denominated paper ledger. Quotes are fetched server-side before a simulated fill.</div>
    <div class="controls" style="margin-top:10px">
-    <div class="field"><label>Instrument</label><select id="mmSymbol"></select></div>
+    <div class="field"><label>Instrument</label><select id="mmSymbol" onchange="loadMultiMarketCandles()"></select></div>
     <div class="field"><label>Side</label><select id="mmSide"><option>BUY</option><option>SELL</option></select></div>
     <div class="field"><label>USD notional</label><input id="mmAmount" type="number" min="0.1" step="0.1" value="0.9"></div>
    </div>
