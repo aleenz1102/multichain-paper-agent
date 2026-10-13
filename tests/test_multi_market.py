@@ -53,11 +53,11 @@ class MultiMarketPaperTests(unittest.TestCase):
     def test_paper_buy_uses_separate_ledger_and_keeps_legacy_trades_untouched(self):
         with patch.object(main, "multi_market_quote", side_effect=self.fresh_quote):
             result = main.multi_market_order(main.MultiMarketOrderInput(
-                market_type="stocks", symbol="STKAAPL", side="BUY", amount_usd=3.0,
+                market_type="stocks", symbol="STKAAPL", side="BUY", amount_usd=0.9,
             ))
             self.assertTrue(result["ok"])
             self.assertFalse(result["portfolio"]["live_trading"])
-            self.assertAlmostEqual(result["notional_usd"], 3.0, places=6)
+            self.assertAlmostEqual(result["notional_usd"], 0.9, places=6)
             self.assertEqual(result["side"], "BUY")
         self.assertEqual(len(main.rows("SELECT * FROM multi_market_trades")), 1)
         self.assertEqual(len(main.rows("SELECT * FROM trades")), 0)
