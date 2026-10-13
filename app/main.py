@@ -1614,6 +1614,24 @@ def multi_market_instruments_route(market_type: str = "crypto", limit: int = 30)
     return multi_market_instruments(market_type, limit)
 
 
+@app.get("/api/multi-market/candles")
+def multi_market_candles_route(market_type: str = "crypto", symbol: str = "BTC"):
+    """Return completed public candles for the dashboard; never synthesize chart data."""
+    if market_type not in MARKET_TYPES:
+        raise HTTPException(400, "Unknown market category.")
+    symbol = str(symbol).strip().upper()
+    candles = multi_market_candles(market_type, symbol)
+    if not isinstance(candles, list) or not candles:
+        raise HTTPException(503, "No completed candle history available.")
+    latest = candles[-1].get("timestamp")
+    return {
+        "market_type": market_type, "symbol": symbol, "candles": candles,
+        "count": len(candles), "latest_at": latest,
+        "interval": "5m" if market_type == "crypto" else "provider interval",
+        "mode": "PUBLIC_DATA_PAPER_ONLY", "synthetic": False,
+    }
+
+
 @app.get("/api/multi-market/portfolio")
 def multi_market_portfolio_route():
     return multi_market_portfolio()
