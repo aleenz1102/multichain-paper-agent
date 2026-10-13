@@ -1417,8 +1417,12 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
                     candle_high = float(candle["high"])
                     stop_price = float(risk["stop_loss"])
                     target_price = float(risk["take_profit"])
-                    exit_reason = ("stop_loss" if candle_low <= stop_price else
-                                   "take_profit" if candle_high >= target_price else None)
+                    entry_candle = str(risk.get("opened_candle_timestamp", ""))
+                    if entry_candle and str(candle_ts) <= entry_candle:
+                        exit_reason = None
+                    else:
+                        exit_reason = ("stop_loss" if candle_low <= stop_price else
+                                       "take_profit" if candle_high >= target_price else None)
                 except (KeyError, TypeError, ValueError):
                     exit_reason = None
                 if exit_reason:
@@ -1476,6 +1480,9 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
                     market_type=market_type, symbol=symbol, side="SELL",
                     amount_usd=1.0, sell_percent=100,
                 ))
+                risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+                risk_book.pop(market_type + ":" + symbol, None)
+                set_multi_market_setting("auto_position_risk", risk_book)
             else:
                 portfolio_value = multi_market_portfolio()
                 amount = min(portfolio_value["equity_usd"] * float(cfg["max_trade_pct"]) / 100,
@@ -1498,6 +1505,7 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
                     "stop_loss": round(fill - (entry_reference - stop_reference), 10),
                     "take_profit": round(fill + (target_reference - entry_reference), 10),
                     "opened_at": now_iso(),
+                    "opened_candle_timestamp": str(candle_ts),
                     "entry_trade_id": result["trade_id"],
                     "method": "ATR stop / 1.5R target; stop-first if both levels cross within one candle",
                 }
