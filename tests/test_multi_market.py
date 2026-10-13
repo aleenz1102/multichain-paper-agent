@@ -124,6 +124,7 @@ class MultiMarketPaperTests(unittest.TestCase):
                 "items": [{"symbol": "STKAAPL", "market_type": "stocks"}],
             }),
             patch.object(main, "multi_market_candles", return_value=candles),
+            patch.object(main, "multi_market_quote", side_effect=self.fresh_quote),
         ):
             with patch.object(main, "multi_market_order", return_value={"trade_id": 2}) as place_order:
                 result = main.multi_market_auto_cycle("stocks", 1)
