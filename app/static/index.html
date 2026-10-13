@@ -3,6 +3,21 @@
 <title>Multi-Chain Paper Agent</title>
 <style>
 :root{color-scheme:dark;--bg:#050914;--panel:#080f20;--line:#3b1749;--pink:#ff26c9;--cyan:#24e5ff;--green:#00f0a0;--red:#ff456f;--muted:#8da2c2;--text:#edf6ff;--amber:#ffb53d}
+/* Simplified mobile-first paper desk: keep the multi-market workflow as the home screen. */
+main{max-width:1280px;padding:12px;gap:12px}
+main>section:not(#multiMarketPanel){display:none!important}
+#multiMarketPanel{display:block!important;border-color:#26354d;background:#0b1220;box-shadow:none}
+#multiMarketPanel .small{font-size:12px}
+#multiMarketPanel .card{border-color:#26354d;box-shadow:none;background:#0e1728}
+#multiMarketPanel h2{font-size:14px;letter-spacing:0;text-transform:none;color:#f1f5f9}
+#multiMarketPanel .pill{border-color:#334155;background:#162236}
+#multiMarketPanel .controls{display:flex;flex-wrap:wrap;gap:10px}
+#multiMarketPanel .layout{grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr)}
+#mmChart{width:100%;height:260px;display:block}
+#mmChartCard{margin-top:12px}
+#mmChartMeta{font-size:12px}
+#multiMarketPanel .tablewrap{max-height:360px}
+@media(max-width:760px){main{padding:8px}#multiMarketPanel .layout{grid-template-columns:1fr}#multiMarketPanel .stats{grid-template-columns:repeat(2,minmax(0,1fr))}#mmChart{height:210px}header{padding:12px}h1{font-size:17px}}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 20% 0,#21103a 0,transparent 35%),#040711;color:var(--text);font:13px/1.45 Inter,Segoe UI,system-ui,Arial}header{height:auto;min-height:66px;padding:14px 20px;border-bottom:1px solid var(--pink);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:#080714;box-shadow:0 0 22px #ff26c933}h1{font-size:19px;letter-spacing:.06em;margin:0;color:#fff;text-shadow:0 0 15px var(--pink)}h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;margin:0 0 13px;color:#f4eaff}.sub,.small{font-size:11px;color:var(--muted)}.brand{display:flex;align-items:center;gap:12px}.bot{font-size:26px;color:var(--cyan);filter:drop-shadow(0 0 7px var(--cyan))}.banner,.pill{border:1px solid var(--pink);padding:6px 10px;border-radius:5px;font-size:10px;letter-spacing:.08em;font-weight:800;color:#fff;background:#ff26c916}.banner{border-color:var(--green);color:var(--green)}main{max-width:1800px;margin:auto;padding:15px;display:grid;gap:12px}.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(320px,.9fr);gap:12px}.card{min-width:0;background:linear-gradient(145deg,#0a1426,#080b18);border:1px solid var(--pink);border-radius:9px;padding:14px;box-shadow:0 0 12px #ff26c91a,inset 0 0 20px #1b0d261c}.stat{border:1px solid var(--cyan);box-shadow:0 0 12px #24e5ff24}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.11em}.value{font-size:clamp(19px,2vw,27px);font-weight:800;margin-top:7px;overflow-wrap:anywhere}.positive{color:var(--green)}.negative{color:var(--red)}.muted{color:var(--muted)}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.spread{justify-content:space-between}.tablewrap{overflow:auto;max-height:none;min-height:280px;flex:1;overscroll-behavior:contain}.market-card{display:flex;flex-direction:column;min-height:520px;height:min(76vh,900px)}.market-card .tablewrap{min-height:0}.market-card .tablewrap table tbody tr{cursor:pointer}.market-card .tablewrap tbody tr:hover{background:#132038}.market-card .tablewrap tbody tr.selected{background:#112b3b;outline:1px solid var(--cyan)}.market-detail{margin-top:12px;border:1px solid #24415a;border-radius:7px;padding:12px;background:#060c18}.detail-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.detail-stat{padding:8px;border:1px solid #1d2940;border-radius:5px;min-width:0}.detail-stat .value{font-size:16px}.candle-wrap{height:280px;overflow:hidden;margin-top:10px;background:linear-gradient(#0b1322,#070b15);border-radius:5px}.candle-wrap svg{width:100%;height:100%;display:block}.market-toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.market-toolbar button.active{border-color:var(--cyan);color:var(--cyan)}.signal-copy{white-space:normal;overflow-wrap:anywhere}@media(max-width:1000px){.market-card{height:auto;min-height:0}.market-card .tablewrap{max-height:55vh;min-height:260px}.detail-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.candle-wrap{height:230px}}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #1d2940;font-size:11px}th{position:sticky;top:0;background:#080d1b;color:#91a8c8;text-transform:uppercase;font-size:9px;letter-spacing:.08em}td strong{font-size:12px}.pill{display:inline-block;padding:3px 7px;border-radius:4px;font-size:9px}.buy{color:var(--green);border-color:#087d61}.sell{color:var(--red);border-color:#a52849}.hold{color:var(--amber);border-color:#75501a}.field label{display:block;font-size:10px;color:var(--muted);margin-bottom:5px}.field input,.field select{width:100%;min-width:0;background:#050a16;color:var(--text);border:1px solid #3c3155;border-radius:5px;padding:9px}button{background:#21102e;color:#fff;border:1px solid var(--pink);padding:8px 10px;border-radius:5px;font-weight:700;font-size:11px;cursor:pointer}button:hover{box-shadow:0 0 12px #ff26c955}button.safe{background:#06291f;border-color:#00a976;color:var(--green)}button.danger{background:#310e20;border-color:#ff456f;color:#ff829d}.controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.notice{border:1px solid #3d2751;background:#100b20;padding:10px;border-radius:5px;color:#b7c7e3;font-size:11px}.chart{width:100%;height:150px;display:block}.chart line{stroke:#20304b;stroke-width:1}.chart path{fill:none;stroke:var(--green);stroke-width:2.5;filter:drop-shadow(0 0 4px #00f0a0)}.side-stack{display:grid;gap:12px;align-content:start}.strategy{display:grid;grid-template-columns:minmax(0,1fr) minmax(88px,auto);gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #1d2940}.strategy>div{min-width:0}.strategy>span{max-width:190px;white-space:normal;overflow-wrap:anywhere;text-align:center;line-height:1.35}.side-stack .row{min-width:0}.side-stack .row>label{min-width:0;flex:1 1 100%}.side-stack .row>button{flex:0 1 auto}.switch{accent-color:#00f0a0;width:17px;height:17px}.footer{font-size:10px;color:var(--muted);padding:6px}.mini{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mini .value{font-size:18px}.message{min-height:18px;color:var(--cyan);font-size:11px;margin-top:8px}
 @media(max-width:1000px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.layout{grid-template-columns:1fr}}@media(max-width:520px){main{padding:8px}.controls{grid-template-columns:1fr 1fr}.stats{gap:7px}.card{padding:10px}.value{font-size:18px}header{padding:12px}}
 </style></head><body>
@@ -355,6 +370,8 @@ async function loadMultiMarket(){
   const prior=$('mmSymbol').value;
   $('mmSymbol').innerHTML=mmSelectedItems.map(x=>'<option value="'+esc(x.symbol)+'">'+esc(x.display_symbol||x.symbol)+'</option>').join('');
   if(mmSelectedItems.some(x=>x.symbol===prior))$('mmSymbol').value=prior;
+  if(!mmSelectedItems.some(x=>x.symbol=== $('mmSymbol').value) && mmSelectedItems.length)$('mmSymbol').value=mmSelectedItems[0].symbol;
+  await loadMultiMarketCandles();
   const s=await api('/api/multi-market/portfolio');
   $('mmEquity').textContent=mmUsd(s.equity_usd);$('mmCash').textContent=mmUsd(s.virtual_cash_usd);
   $('mmPnL').textContent=mmUsd(s.net_pnl_usd);$('mmPnL').className='value '+(s.net_pnl_usd>0?'positive':s.net_pnl_usd<0?'negative':'');
@@ -376,7 +393,26 @@ async function loadMultiMarket(){
   $('mmInstrumentRows').innerHTML='<tr><td colspan="6" class="negative">No fresh public data. Paper actions are unavailable until the feed recovers.</td></tr>';
  }
 }
-function selectMultiMarketInstrument(symbol){$('mmSymbol').value=symbol;$('mmOrderMessage').textContent='Selected '+symbol+' for the '+$('mmMarketType').value+' paper ticket.';}
+function drawMultiMarketCandles(candles){
+ const svg=$('mmChart');const data=(candles||[]).filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0));
+ if(!data.length){svg.innerHTML='<text x="24" y="36" fill="#f59e0b">No fresh completed candles available. Chart will retry automatically.</text>';return;}
+ const W=1000,H=260,p=24,lo=Math.min(...data.map(c=>Number(c.low))),hi=Math.max(...data.map(c=>Number(c.high))),span=Math.max(hi-lo,1e-12),step=(W-2*p)/data.length,body=Math.max(2,step*.6),y=v=>H-p-(v-lo)/span*(H-2*p);
+ let out='';
+ for(let k=0;k<5;k++){const yy=p+k*(H-2*p)/4,v=hi-k*span/4;out+='<line x1="'+p+'" y1="'+yy+'" x2="'+(W-p)+'" y2="'+yy+'" stroke="#243247"/><text x="'+(W-p)+'" y="'+(yy-4)+'" text-anchor="end" font-size="11" fill="#94a3b8">'+num(v,8)+'</text>';}
+ data.forEach((c,i)=>{const x=p+i*step+step/2,o=y(+c.open),cl=y(+c.close),h=y(+c.high),l=y(+c.low),up=+c.close>=+c.open,col=up?'#34d399':'#fb7185';out+='<line x1="'+x+'" y1="'+h+'" x2="'+x+'" y2="'+l+'" stroke="'+col+'"/><rect x="'+(x-body/2)+'" y="'+Math.min(o,cl)+'" width="'+body+'" height="'+Math.max(1,Math.abs(cl-o))+'" fill="'+col+'"/>';});
+ svg.innerHTML=out;
+}
+async function loadMultiMarketCandles(){
+ const type=$('mmMarketType')?.value||'crypto',symbol=$('mmSymbol')?.value||mmSelectedItems[0]?.symbol;
+ if(!symbol)return;
+ $('mmChartTitle').textContent=(mmSelectedItems.find(x=>x.symbol===symbol)?.display_symbol||symbol)+' · price chart';
+ try{
+  const d=await api('/api/multi-market/candles?market_type='+encodeURIComponent(type)+'&symbol='+encodeURIComponent(symbol));
+  drawMultiMarketCandles(d.candles||[]);
+  $('mmChartMeta').textContent=(d.count||0)+' completed candles · latest '+(d.latest_at?new Date(d.latest_at).toLocaleString():'timestamp unavailable')+' · '+(d.interval||'provider interval');
+ }catch(e){$('mmChart').innerHTML='<text x="24" y="36" fill="#f59e0b">Candles unavailable: '+esc(e.message).slice(0,110)+'</text>';$('mmChartMeta').textContent='No fabricated candles; retrying automatically.';}
+}
+function selectMultiMarketInstrument(symbol){$('mmSymbol').value=symbol;$('mmOrderMessage').textContent='Selected '+symbol+' for the '+$('mmMarketType').value+' paper ticket.';loadMultiMarketCandles();}
 async function saveMultiMarketSettings(){
  try{
   const type=$('mmMarketType').value;
