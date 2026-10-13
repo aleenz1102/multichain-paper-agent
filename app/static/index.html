@@ -350,7 +350,7 @@ async function loadMultiMarket(){
    const candleReady=live&&x.auto_supported===true&&x.history_status==='fresh'&&Number(x.candle_count||0)>=30;
    const dataLabel=candleReady?'PAPER READY':live?'PRICE LIVE · MANUAL PAPER':'STALE / BLOCKED';
    const dataClass=candleReady?'buy':live?'hold':'sell';
-   return '<tr><td><strong>'+esc(x.display_symbol||x.symbol)+'</strong><div class="small">'+esc(x.name||'')+'</div></td><td>'+mmPrice(x)+' <span class="small">'+esc(x.currency||'USD')+'</span></td><td class="'+(Number(x.change_pct||0)>=0?'positive':'negative')+'">'+ch+'</td><td>'+activity+'</td><td><span class="pill '+dataClass+'">'+dataLabel+'</span><div class="small">'+esc(x.history_status||'history unknown')+' · '+num(x.candle_count||0,0)+' candles</div></td><td><button onclick="selectMultiMarketInstrument(\\''+esc(x.symbol)+'\\')">Select</button></td></tr>';
+   return '<tr><td><strong>'+esc(x.display_symbol||x.symbol)+'</strong><div class="small">'+esc(x.name||'')+'</div></td><td>'+mmPrice(x)+' <span class="small">'+esc(x.currency||'USD')+'</span></td><td class="'+(Number(x.change_pct||0)>=0?'positive':'negative')+'">'+ch+'</td><td>'+activity+'</td><td><span class="pill '+dataClass+'">'+dataLabel+'</span><div class="small">'+esc(x.history_status||'history unknown')+' · '+num(x.candle_count||0,0)+' candles</div></td><td><button onclick="selectMultiMarketInstrument(&quot;'+esc(x.symbol)+'&quot;)">Select</button></td></tr>';
   }).join('')||'<tr><td colspan="6">No instruments returned by this provider.</td></tr>';
   const prior=$('mmSymbol').value;
   $('mmSymbol').innerHTML=mmSelectedItems.map(x=>'<option value="'+esc(x.symbol)+'">'+esc(x.display_symbol||x.symbol)+'</option>').join('');
