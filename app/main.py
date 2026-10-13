@@ -1072,10 +1072,12 @@ def metrics():
 # Independent USD-denominated multi-market paper account. The existing crypto
 # ledger and its stored balances are not rewritten or migrated by this feature.
 MULTI_MARKET_DEFAULTS = {
+    # Conservative paper-first defaults sized for a small $30 research account.
+    # Existing user settings remain untouched by INSERT OR IGNORE during startup.
     "virtual_cash_usd": 30.0, "fee_bps": 10.0, "slippage_bps": 8.0,
-    "max_trade_pct": 10.0, "daily_loss_limit_pct": 3.0,
-    "max_positions": 4, "paused": False, "auto_enabled": False,
-    "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0,
+    "max_trade_pct": 3.0, "daily_loss_limit_pct": 3.0,
+    "max_positions": 3, "paused": False, "auto_enabled": False,
+    "max_drawdown_pct": 8.0, "max_exposure_pct": 30.0,
     "high_water_equity_usd": 30.0, "selected_market": "crypto",
     "last_auto_candle_by_symbol": {},
 }
@@ -1406,8 +1408,23 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
             set_multi_market_setting("last_auto_candle_by_symbol", last_seen)
             signal = combined_signal(candles)
             side = str(signal.get("signal", "HOLD")).upper()
+            score = float(signal.get("score", 0.0) or 0.0)
+            regime = str(signal.get("regime", "uncertain"))
+            # A ticker ranking is not a trading signal. Entries require a stronger
+            # completed-candle signal, a trending regime, and a valid ATR risk plan.
+            if side == "BUY":
+                plan = build_trade_plan(candles, signal)
+                if score < 0.45 or regime != "trending" or not plan.get("available"):
+                    actions.append({
+                        "symbol": symbol, "signal": side, "score": score, "regime": regime,
+                        "status": "no_action",
+                        "reason": ("Entry gate: require score >= 0.45, trending regime, "
+                                   "and valid ATR stop/target estimates."),
+                    })
+                    continue
             if side not in ("BUY", "SELL") or (market_type == "prediction"):
-                actions.append({"symbol": symbol, "signal": side, "status": "no_action", "reason": signal.get("reason", "No trade signal.")})
+                actions.append({"symbol": symbol, "signal": side, "score": score, "regime": regime,
+                                "status": "no_action", "reason": signal.get("reason", "No trade signal.")})
                 continue
             if side == "SELL":
                 portfolio_value = multi_market_portfolio()
