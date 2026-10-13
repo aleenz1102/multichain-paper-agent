@@ -1565,6 +1565,9 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
     return {"status": "completed", "mode": "PAPER_ONLY", "market_type": market_type,
             "live_trading": False, "orders_submitted": False,
             "evaluated": len(candidates), "paper_fills": sum(x.get("status") == "paper_filled" for x in actions),
+            "typesafe_ranking": ranking_meta,
+            "candidate_order": [{"symbol": x.get("symbol"), "score": x.get("typesafe_rank_score"),
+                                 "confidence": x.get("typesafe_confidence")} for x in candidates],
             "actions": actions}
 
 
