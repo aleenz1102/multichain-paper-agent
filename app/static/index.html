@@ -366,8 +366,11 @@ async function loadMultiMarket(){
   const [trades,auto]=await Promise.all([api('/api/multi-market/trades'),api('/api/multi-market/auto/status')]);
   $('mmTrades').innerHTML=trades.map(t=>'<tr><td>'+esc(String(t.ts||'').replace('T',' ').slice(0,16))+'</td><td>'+esc(t.market_type)+'</td><td>'+esc(t.display_symbol||t.symbol)+'</td><td class="'+(t.side==='BUY'?'positive':'negative')+'">'+esc(t.side)+'</td><td>'+mmUsd(t.price)+'</td><td>'+mmUsd(t.realized_pnl)+'</td></tr>').join('')||'<tr><td colspan="6">No paper trades</td></tr>';
   $('mmAutoStatus').textContent=auto.enabled?(auto.paused?'PAUSED':'ON'):'OFF';
-  const summary=auto.last_auto_cycle_summary||{};\n  $('mmAutoCycles').textContent='Cycles '+auto.cycles_completed+' done / '+auto.cycles_failed+' failed · '+(auto.last_cycle_status||'not started')+(auto.last_cycle_error?' · '+auto.last_cycle_error:'');\n  $('mmManagedPositions').textContent=(auto.managed_positions||0)+' bot-managed positions · '+(summary.markets_scanned||0)+' markets scanned · '+(summary.paper_fills||0)+' fills last sweep';
-  if(type==='prediction'&&$('mmAutoEnabled').checked)$('mmAutoEnabled').checked=false;\n  $('mmAutoEnabled').disabled=type==='prediction';
+  const summary=auto.last_auto_cycle_summary||{};
+  $('mmAutoCycles').textContent='Cycles '+auto.cycles_completed+' done / '+auto.cycles_failed+' failed · '+(auto.last_cycle_status||'not started')+(auto.last_cycle_error?' · '+auto.last_cycle_error:'');
+  $('mmManagedPositions').textContent=(auto.managed_positions||0)+' bot-managed positions · '+(summary.markets_scanned||0)+' markets scanned · '+(summary.paper_fills||0)+' fills last sweep';
+  if(type==='prediction'&&$('mmAutoEnabled').checked)$('mmAutoEnabled').checked=false;
+  $('mmAutoEnabled').disabled=type==='prediction';
  }catch(e){
   $('mmStatus').textContent='Market data unavailable: '+e.message;
   $('mmInstrumentRows').innerHTML='<tr><td colspan="6" class="negative">No fresh public data. Paper actions are unavailable until the feed recovers.</td></tr>';
@@ -399,7 +402,8 @@ async function resumeMultiMarket(){try{await api('/api/multi-market/resume',{met
 $('mmMarketType').addEventListener('change',async()=>{
  try{
   const type=$('mmMarketType').value;
-  if(type==='prediction')$('mmAutoEnabled').checked=false;\n  $('mmAutoEnabled').disabled=type==='prediction';
+  if(type==='prediction')$('mmAutoEnabled').checked=false;
+  $('mmAutoEnabled').disabled=type==='prediction';
   await api('/api/multi-market/settings',{method:'PATCH',body:JSON.stringify({selected_market:type,auto_enabled:type==='prediction'?false:$('mmAutoEnabled').checked})});
   await loadMultiMarket();
  }catch(e){$('mmStatus').textContent=e.message;}
