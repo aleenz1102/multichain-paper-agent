@@ -105,6 +105,72 @@ class MultiMarketPaperTests(unittest.TestCase):
         self.assertIn("score >= 0.45", result["actions"][0]["reason"])
         place_order.assert_not_called()
 
+    def test_auto_stop_loss_closes_bot_managed_position_and_clears_risk(self):
+        main.set_multi_market_setting("auto_enabled", True)
+        main.set_multi_market_setting("auto_position_risk", {
+            "stocks:STKAAPL": {
+                "entry_price": 2.0, "stop_loss": 1.9, "take_profit": 2.2,
+                "opened_candle_timestamp": "2026-01-01T00:00:00+00:00",
+                "entry_trade_id": 1,
+            },
+        })
+        candles = [{
+            "timestamp": "2026-01-01T00:15:00+00:00",
+            "open": 2.0, "high": 2.05, "low": 1.85, "close": 1.92, "volume": 10,
+        }]
+        with (
+            patch.object(main, "multi_market_instruments", return_value={
+                "provider_status": "fresh",
+                "items": [{"symbol": "STKAAPL", "market_type": "stocks"}],
+            }),
+            patch.object(main, "multi_market_candles", return_value=candles),
+            patch.object(main, "multi_market_order", return_value={"trade_id": 2}),
+        ) as place_order:
+            result = main.multi_market_auto_cycle("stocks", 1)
+        self.assertEqual(result["actions"][0]["status"], "risk_exit_filled")
+        self.assertEqual(result["actions"][0]["reason"], "stop_loss")
+        order = place_order.call_args.args[0]
+        self.assertEqual(order.side, "SELL")
+        self.assertEqual(order.sell_percent, 100)
+        self.assertEqual(main.multi_market_settings()["auto_position_risk"], {})
+
+    def test_auto_stop_does_not_trigger_on_entry_candle(self):
+        main.set_multi_market_setting("auto_enabled", True)
+        main.set_multi_market_setting("auto_position_risk", {
+            "stocks:STKAAPL": {
+                "entry_price": 2.0, "stop_loss": 1.9, "take_profit": 2.2,
+                "opened_candle_timestamp": "2026-01-01T00:15:00+00:00",
+                "entry_trade_id": 1,
+            },
+        })
+        candles = [{
+            "timestamp": "2026-01-01T00:15:00+00:00",
+            "open": 2.0, "high": 2.25, "low": 1.85, "close": 2.0, "volume": 10,
+        }]
+        with (
+            patch.object(main, "multi_market_instruments", return_value={
+                "provider_status": "fresh",
+                "items": [{"symbol": "STKAAPL", "market_type": "stocks"}],
+            }),
+            patch.object(main, "multi_market_candles", return_value=candles),
+            patch.object(main, "combined_signal", return_value={"signal": "HOLD", "score": 0.0, "regime": "range_bound"}),
+            patch.object(main, "multi_market_order") as place_order,
+        ):
+            result = main.multi_market_auto_cycle("stocks", 1)
+        self.assertNotEqual(result["actions"][0]["status"], "risk_exit_filled")
+        place_order.assert_not_called()
+
+    def test_automation_sweep_includes_supported_markets_but_not_prediction(self):
+        main.set_multi_market_setting("auto_enabled", True)
+        with patch.object(main, "multi_market_auto_cycle", side_effect=lambda market, max_symbols=6: {
+            "status": "completed", "market_type": market, "paper_fills": 0, "actions": [],
+        }) as cycle:
+            result = main.multi_market_auto_cycle_all(max_symbols=1)
+        self.assertGreaterEqual(result["markets_scanned"], 1)
+        self.assertNotIn("prediction", [c["market_type"] for c in result["market_cycles"]])
+        self.assertTrue(all(c["status"] == "completed" for c in result["market_cycles"]))
+        self.assertEqual(cycle.call_count, result["markets_scanned"])
+
     def test_market_catalog_is_paper_only(self):
         catalog = main.multi_market_catalog()
         ids = {x["id"] for x in catalog["markets"]}
