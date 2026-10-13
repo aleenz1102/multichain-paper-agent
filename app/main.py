@@ -1429,28 +1429,36 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
             if not candle_ts:
                 actions.append({"symbol": symbol, "status": "blocked", "reason": "Completed candle timestamp missing."})
                 continue
-            if str(last_seen.get(key, "")) >= str(candle_ts):
-                actions.append({"symbol": symbol, "status": "skipped_duplicate_candle", "candle_timestamp": candle_ts})
-                continue
-            # Persisted bot-owned risk levels are evaluated before any new entry.
-            # If stop and target are both crossed inside one candle, assume the stop filled first.
+            new_completed_candle = str(last_seen.get(key, "")) < str(candle_ts)
+            # Persisted bot-owned risk levels are evaluated every scheduler cycle using
+            # a fresh quote; completed-candle OHLC is a conservative fallback for gaps.
+            # If both levels cross within one candle, assume the stop filled first.
             risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
             risk = risk_book.get(key)
             if risk:
+                stop_price = float(risk["stop_loss"])
+                target_price = float(risk["take_profit"])
+                exit_reason = None
                 try:
-                    candle = candles[-1]
-                    candle_low = float(candle["low"])
-                    candle_high = float(candle["high"])
-                    stop_price = float(risk["stop_loss"])
-                    target_price = float(risk["take_profit"])
-                    entry_candle = str(risk.get("opened_candle_timestamp", ""))
-                    if entry_candle and str(candle_ts) <= entry_candle:
+                    live_quote = multi_market_quote(market_type, symbol)
+                    live_price = float(live_quote["price"])
+                    if live_price <= stop_price:
+                        exit_reason = "stop_loss"
+                    elif live_price >= target_price:
+                        exit_reason = "take_profit"
+                except (HTTPException, KeyError, TypeError, ValueError):
+                    pass
+                if exit_reason is None and new_completed_candle:
+                    try:
+                        candle = candles[-1]
+                        candle_low = float(candle["low"])
+                        candle_high = float(candle["high"])
+                        entry_candle = str(risk.get("opened_candle_timestamp", ""))
+                        if not entry_candle or str(candle_ts) > entry_candle:
+                            exit_reason = ("stop_loss" if candle_low <= stop_price else
+                                           "take_profit" if candle_high >= target_price else None)
+                    except (KeyError, TypeError, ValueError):
                         exit_reason = None
-                    else:
-                        exit_reason = ("stop_loss" if candle_low <= stop_price else
-                                       "take_profit" if candle_high >= target_price else None)
-                except (KeyError, TypeError, ValueError):
-                    exit_reason = None
                 if exit_reason:
                     try:
                         result = multi_market_order(MultiMarketOrderInput(
