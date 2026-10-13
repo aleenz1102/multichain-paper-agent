@@ -23,6 +23,7 @@ from app.backtest import BacktestConfig, run_backtest
 from app.auto_monitor import MonitorConfig, PaperSignalMonitor
 from app.candle_data import BinancePublicCandleProvider
 from app.auto_scheduler import PaperAutoScheduler
+from app.market_adapters import PublicMultiMarketProvider, MARKET_TYPES, MarketDataError
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT.parent / "paper_agent.db"
@@ -41,6 +42,7 @@ async def set_security_headers(request, call_next):
 live_provider = CoinGeckoFreeProvider()
 universe_provider = TrendingUniverseProvider()
 news_provider = CryptoNewsProvider()
+multi_market_provider = PublicMultiMarketProvider()
 
 # Synthetic demo universe. No live provider or signing functionality is included.
 ASSETS = [
@@ -96,6 +98,19 @@ def init_db():
         )""")
         for k,v in DEFAULTS.items():
             c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)",(k,json.dumps(v)))
+        c.execute("""CREATE TABLE IF NOT EXISTS multi_market_settings (
+            key TEXT PRIMARY KEY, value TEXT NOT NULL
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS multi_market_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL,
+            market_type TEXT NOT NULL, symbol TEXT NOT NULL, display_symbol TEXT NOT NULL,
+            side TEXT NOT NULL, qty REAL NOT NULL, price REAL NOT NULL,
+            notional REAL NOT NULL, fee REAL NOT NULL, slippage_cost REAL NOT NULL,
+            realized_pnl REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'paper_filled'
+        )""")
+        for key, value in MULTI_MARKET_DEFAULTS.items():
+            c.execute("INSERT OR IGNORE INTO multi_market_settings(key,value) VALUES(?,?)",
+                      (key, json.dumps(value)))
         c.commit()
 def settings():
     with connect() as c: rows=c.execute("SELECT key,value FROM settings").fetchall()
@@ -269,7 +284,7 @@ _auto_scheduler: PaperAutoScheduler | None = None
 
 @app.on_event("startup")
 def startup():
-    global _auto_scheduler
+    global _auto_scheduler, _multi_market_scheduler
     init_db()
     _auto_scheduler = PaperAutoScheduler(
         enabled=lambda: bool(settings().get("auto_monitor_enabled", False)),
@@ -279,11 +294,21 @@ def startup():
         interval_seconds=60,
     )
     _auto_scheduler.start()
+    _multi_market_scheduler = PaperAutoScheduler(
+        enabled=lambda: bool(multi_market_settings().get("auto_enabled", False)),
+        paused=lambda: bool(multi_market_settings().get("paused", False)),
+        run_cycle=lambda: multi_market_auto_cycle(),
+        audit=audit,
+        interval_seconds=60,
+    )
+    _multi_market_scheduler.start()
 
 @app.on_event("shutdown")
 def shutdown():
     if _auto_scheduler is not None:
         _auto_scheduler.stop(timeout=10)
+    if _multi_market_scheduler is not None:
+        _multi_market_scheduler.stop(timeout=10)
 @app.get("/", response_class=HTMLResponse)
 def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 @app.get("/api/health")
@@ -1042,3 +1067,474 @@ def metrics():
             "max_drawdown_realized_proxy":round(dd,2),"fees":round(sum(t["fee"] for t in ts),2),
             "slippage":round(sum(t["slippage_cost"] for t in ts),2),
             "note":"Metrics are based on simulated fills. Drawdown is a realized-P&L proxy, not a full historical equity-curve drawdown."}
+
+
+# Independent USD-denominated multi-market paper account. The existing crypto
+# ledger and its stored balances are not rewritten or migrated by this feature.
+MULTI_MARKET_DEFAULTS = {
+    "virtual_cash_usd": 30.0, "fee_bps": 10.0, "slippage_bps": 8.0,
+    "max_trade_pct": 10.0, "daily_loss_limit_pct": 3.0,
+    "max_positions": 4, "paused": False, "auto_enabled": False,
+    "max_drawdown_pct": 10.0, "max_exposure_pct": 60.0,
+    "high_water_equity_usd": 30.0, "selected_market": "crypto",
+    "last_auto_candle_by_symbol": {},
+}
+_multi_market_quote_cache = {}
+_multi_market_quote_cache_lock = Lock()
+_multi_market_scheduler: PaperAutoScheduler | None = None
+
+
+def multi_market_settings():
+    with connect() as c:
+        stored = {r["key"]: json.loads(r["value"])
+                  for r in c.execute("SELECT key,value FROM multi_market_settings").fetchall()}
+    return {**MULTI_MARKET_DEFAULTS, **stored}
+
+
+def set_multi_market_setting(key, value):
+    if key not in MULTI_MARKET_DEFAULTS:
+        raise ValueError("Unsupported multi-market setting.")
+    with connect() as c:
+        c.execute(
+            "INSERT INTO multi_market_settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, json.dumps(value)),
+        )
+        c.commit()
+
+
+def multi_market_instruments(market_type: str, limit: int = 30):
+    if market_type not in MARKET_TYPES:
+        raise HTTPException(400, "Unknown market category.")
+    limit = max(1, min(int(limit), 100))
+    if market_type == "crypto":
+        try:
+            scan = universe_provider.scan(limit=100, min_quote_volume=500_000)
+        except RuntimeError as exc:
+            raise HTTPException(503, "Public USDT scanner unavailable; no synthetic values substituted.") from exc
+        items = []
+        for item in scan.get("items", []):
+            price = item.get("price_usdt")
+            if not isinstance(price, (int, float)) or not math.isfinite(float(price)) or price <= 0:
+                continue
+            items.append({
+                "market_type": "crypto", "symbol": item["symbol"],
+                "display_symbol": item["symbol"] + "/USDT", "name": item["symbol"] + " / Tether",
+                "price": float(price), "currency": "USDT",
+                "change_pct": item.get("change_24h_pct"),
+                "volume": item.get("quote_volume_24h_usdt", 0),
+                "provider": "Binance public spot ticker",
+                "fetched_at": scan.get("scanned_at"),
+                "data_status": "STALE" if scan.get("provider_status") == "stale_cache" else "LIVE PUBLIC PRICE",
+                "history_status": "unknown", "candle_count": None,
+                "auto_supported": True,
+            })
+        return {
+            "market_type": market_type, "label": MARKET_TYPES[market_type]["label"],
+            "provider": scan.get("provider", "Binance public spot ticker"),
+            "provider_status": scan.get("provider_status", "unknown"),
+            "scanned_at": scan.get("scanned_at"), "count": len(items[:limit]),
+            "items": items[:limit],
+            "warning": "Crypto prices are public spot snapshots; simulated fills may differ from executable prices.",
+        }
+    try:
+        return multi_market_provider.instruments(market_type, limit)
+    except MarketDataError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+def multi_market_quote(market_type: str, symbol: str):
+    symbol = str(symbol).strip().upper()
+    key = (market_type, symbol)
+    now = time.monotonic()
+    with _multi_market_quote_cache_lock:
+        cached = _multi_market_quote_cache.get(key)
+        if cached and now - cached[0] < 10:
+            return dict(cached[1])
+    if market_type == "crypto":
+        scan = multi_market_instruments("crypto", 100)
+        if scan.get("provider_status") == "stale_cache":
+            raise HTTPException(503, "USDT market scanner returned stale data; paper order withheld.")
+        item = next((x for x in scan["items"] if x["symbol"] == symbol), None)
+        if item is None:
+            raise HTTPException(400, "Unknown or insufficiently liquid USDT instrument.")
+    else:
+        try:
+            item = multi_market_provider.quote(market_type, symbol)
+        except MarketDataError as exc:
+            raise HTTPException(503, str(exc)) from exc
+    if item.get("data_status") != "LIVE PUBLIC PRICE":
+        raise HTTPException(503, "Market quote is stale or unavailable; paper order withheld.")
+    price = item.get("price")
+    if not isinstance(price, (int, float)) or not math.isfinite(float(price)) or price <= 0:
+        raise HTTPException(503, "Market quote is invalid; paper order withheld.")
+    with _multi_market_quote_cache_lock:
+        _multi_market_quote_cache[key] = (now, dict(item))
+    return item
+
+
+def multi_market_candles(market_type: str, symbol: str):
+    try:
+        if market_type == "crypto":
+            return _candle_provider.get_candles(symbol)
+        return multi_market_provider.candles(market_type, symbol)
+    except (MarketDataError, Exception) as exc:
+        raise HTTPException(503, "Fresh completed candle history unavailable; automated action withheld.") from exc
+
+
+def _multi_market_raw_positions(trades):
+    positions = {}
+    for trade in trades:
+        key = (trade["market_type"], trade["symbol"])
+        if key not in positions:
+            positions[key] = {
+                "market_type": trade["market_type"], "symbol": trade["symbol"],
+                "display_symbol": trade["display_symbol"], "qty": 0.0,
+                "cost": 0.0, "realized_pnl": 0.0,
+            }
+        p = positions[key]
+        if trade["side"] == "BUY":
+            p["qty"] += trade["qty"]
+            p["cost"] += trade["notional"] + trade["fee"] + trade["slippage_cost"]
+        elif p["qty"] > 0:
+            avg_cost = p["cost"] / p["qty"]
+            sold = min(p["qty"], trade["qty"])
+            p["realized_pnl"] += (trade["notional"] - trade["fee"] - trade["slippage_cost"]) - avg_cost * sold
+            p["qty"] -= sold
+            p["cost"] = max(0.0, p["cost"] - avg_cost * sold)
+    return [p for p in positions.values() if p["qty"] > 1e-10]
+
+
+def multi_market_portfolio():
+    cfg = multi_market_settings()
+    trades = rows("SELECT * FROM multi_market_trades ORDER BY id")
+    cash = float(cfg["virtual_cash_usd"])
+    positions = _multi_market_raw_positions(trades)
+    for trade in trades:
+        if trade["side"] == "BUY":
+            cash -= trade["notional"] + trade["fee"] + trade["slippage_cost"]
+        else:
+            cash += trade["notional"] - trade["fee"] - trade["slippage_cost"]
+    unrealized = 0.0
+    exposure = 0.0
+    complete = True
+    unpriced = []
+    for position in positions:
+        try:
+            quote_row = multi_market_quote(position["market_type"], position["symbol"])
+            price = float(quote_row["price"])
+            position["mark_price"] = price
+            position["market_value"] = position["qty"] * price
+            position["unrealized_pnl"] = position["market_value"] - position["cost"]
+            position["valuation_status"] = "FRESH"
+            unrealized += position["unrealized_pnl"]
+        except HTTPException:
+            complete = False
+            unpriced.append(position["market_type"] + ":" + position["symbol"])
+            position["mark_price"] = None
+            position["market_value"] = position["cost"]
+            position["unrealized_pnl"] = None
+            position["valuation_status"] = "UNAVAILABLE"
+        exposure += float(position["market_value"])
+    realized = sum(float(t["realized_pnl"]) for t in trades if t["side"] == "SELL")
+    equity = cash + exposure
+    high_water = max(float(cfg.get("high_water_equity_usd", 0) or 0), equity)
+    if high_water > float(cfg.get("high_water_equity_usd", 0) or 0):
+        set_multi_market_setting("high_water_equity_usd", high_water)
+    drawdown = max(0.0, (high_water - equity) / high_water * 100) if high_water > 0 else 0.0
+    today = datetime.now(timezone.utc).date().isoformat()
+    realized_today = sum(float(t["realized_pnl"]) for t in trades
+                         if t["side"] == "SELL" and str(t["ts"]).startswith(today))
+    return {
+        "mode": "PAPER_ONLY", "currency": "USD", "live_trading": False,
+        "virtual_cash_usd": round(cash, 4), "starting_virtual_cash_usd": cfg["virtual_cash_usd"],
+        "equity_usd": round(equity, 4), "exposure_usd": round(exposure, 4),
+        "realized_pnl_usd": round(realized, 4), "unrealized_pnl_usd": round(unrealized, 4),
+        "net_pnl_usd": round(equity - float(cfg["virtual_cash_usd"]), 4),
+        "fees_paid_usd": round(sum(float(t["fee"]) for t in trades), 4),
+        "slippage_cost_usd": round(sum(float(t["slippage_cost"]) for t in trades), 4),
+        "drawdown_pct": round(drawdown, 4), "high_water_equity_usd": round(high_water, 4),
+        "realized_pnl_today_usd": round(realized_today, 4),
+        "valuation_complete": complete, "unpriced_positions": unpriced,
+        "position_count": len(positions), "positions": positions,
+    }
+
+
+def multi_market_order(order_input):
+    cfg = multi_market_settings()
+    if cfg["paused"]:
+        raise HTTPException(400, "Multi-market paper trading is paused.")
+    market_type = order_input.market_type
+    symbol = order_input.symbol
+    side = order_input.side.upper()
+    if market_type not in MARKET_TYPES:
+        raise HTTPException(400, "Unknown market category.")
+    if side not in ("BUY", "SELL"):
+        raise HTTPException(400, "Side must be BUY or SELL.")
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol) or symbol != symbol.strip().upper():
+        raise HTTPException(400, "Invalid paper instrument symbol.")
+    quote_row = multi_market_quote(market_type, symbol)
+    price = float(quote_row["price"])
+    portfolio_value = multi_market_portfolio()
+    if not portfolio_value["valuation_complete"] and side == "BUY":
+        raise HTTPException(503, "An existing position has no fresh quote; new entries are blocked.")
+    today_loss_limit = float(cfg["virtual_cash_usd"]) * float(cfg["daily_loss_limit_pct"]) / 100
+    if portfolio_value["realized_pnl_today_usd"] <= -today_loss_limit and side == "BUY":
+        raise HTTPException(400, "Daily realized-loss limit reached; new paper entries are locked.")
+    if portfolio_value["drawdown_pct"] >= float(cfg["max_drawdown_pct"]) and side == "BUY":
+        raise HTTPException(400, "Maximum portfolio drawdown reached; new paper entries are locked.")
+    if side == "BUY":
+        amount = float(order_input.amount_usd)
+        if amount > portfolio_value["equity_usd"] * float(cfg["max_trade_pct"]) / 100:
+            raise HTTPException(400, f"Order exceeds max trade allocation ({cfg['max_trade_pct']}% of equity).")
+        active = {(p["market_type"], p["symbol"]): p for p in portfolio_value["positions"]}
+        pos_key = (market_type, symbol)
+        if pos_key not in active and len(active) >= int(cfg["max_positions"]):
+            raise HTTPException(400, "Maximum concurrent multi-market positions reached.")
+        if portfolio_value["exposure_usd"] + amount > portfolio_value["equity_usd"] * float(cfg["max_exposure_pct"]) / 100:
+            raise HTTPException(400, f"Order exceeds portfolio exposure limit ({cfg['max_exposure_pct']}%).")
+        qty = amount / price
+    else:
+        active = {(p["market_type"], p["symbol"]): p for p in portfolio_value["positions"]}
+        position = active.get((market_type, symbol))
+        if not position:
+            raise HTTPException(400, "No open paper position exists for this instrument.")
+        if order_input.sell_percent is not None:
+            qty = position["qty"] * float(order_input.sell_percent) / 100
+        else:
+            qty = float(order_input.amount_usd) / price
+        if qty <= 0 or qty > position["qty"] * (1 + 1e-9):
+            raise HTTPException(400, f"Sell exceeds holdings. Available: {position['qty']:.8f}.")
+    cfg_fee = float(cfg["fee_bps"]) / 10000
+    cfg_slip = float(cfg["slippage_bps"]) / 10000
+    fill_price = price * (1 + cfg_slip if side == "BUY" else 1 - cfg_slip)
+    notional = qty * price
+    fee, slippage_cost = notional * cfg_fee, abs(fill_price - price) * qty
+    if side == "BUY" and notional + fee + slippage_cost > portfolio_value["virtual_cash_usd"]:
+        raise HTTPException(400, "Insufficient multi-market virtual USD cash including fees and slippage.")
+    realized = 0.0
+    if side == "SELL":
+        current = next(p for p in portfolio_value["positions"]
+                       if p["market_type"] == market_type and p["symbol"] == symbol)
+        avg_cost = current["cost"] / current["qty"] if current["qty"] else 0.0
+        realized = (notional - fee - slippage_cost) - avg_cost * qty
+    with connect() as c:
+        cursor = c.execute(
+            """INSERT INTO multi_market_trades(
+                ts,market_type,symbol,display_symbol,side,qty,price,notional,fee,slippage_cost,realized_pnl,status
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (now_iso(), market_type, symbol, quote_row.get("display_symbol", symbol), side,
+             qty, fill_price, notional, fee, slippage_cost, realized, "paper_filled"),
+        )
+        c.commit()
+        trade_id = cursor.lastrowid
+    audit("MULTI_MARKET_PAPER_ORDER_FILLED", {
+        "trade_id": trade_id, "market_type": market_type, "symbol": symbol,
+        "side": side, "qty": qty, "price": fill_price, "currency": "USD",
+        "live_trading": False,
+    })
+    return {"ok": True, "message": "Paper order simulated; no real order was sent.",
+            "trade_id": trade_id, "market_type": market_type, "symbol": symbol,
+            "side": side, "qty": qty, "fill_price": fill_price, "notional_usd": notional,
+            "fee_usd": fee, "slippage_cost_usd": slippage_cost,
+            "portfolio": multi_market_portfolio()}
+
+
+class MultiMarketOrderInput(BaseModel):
+    market_type: str = Field(min_length=3, max_length=20)
+    symbol: str = Field(min_length=2, max_length=20, pattern=r"^[A-Z0-9]{2,20}$")
+    side: str = Field(min_length=3, max_length=4)
+    amount_usd: float = Field(gt=0, le=1000000, allow_inf_nan=False)
+    sell_percent: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+
+
+class MultiMarketSettingsUpdate(BaseModel):
+    virtual_cash_usd: Optional[float] = Field(default=None, ge=1, le=1000000, allow_inf_nan=False)
+    fee_bps: Optional[float] = Field(default=None, ge=0, le=500, allow_inf_nan=False)
+    slippage_bps: Optional[float] = Field(default=None, ge=0, le=500, allow_inf_nan=False)
+    max_trade_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    daily_loss_limit_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    max_positions: Optional[int] = Field(default=None, ge=1, le=30)
+    auto_enabled: Optional[bool] = None
+    paused: Optional[bool] = None
+    max_drawdown_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    max_exposure_pct: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    selected_market: Optional[str] = None
+
+
+class MultiMarketAutoRunInput(BaseModel):
+    market_type: Optional[str] = None
+    max_symbols: int = Field(default=6, ge=1, le=12)
+
+
+def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6):
+    cfg = multi_market_settings()
+    market_type = market_type or cfg.get("selected_market", "crypto")
+    if not cfg.get("auto_enabled", False):
+        return {"status": "disabled", "mode": "PAPER_ONLY", "paper_fills": 0}
+    if cfg.get("paused", False):
+        return {"status": "paused", "mode": "PAPER_ONLY", "paper_fills": 0}
+    if market_type not in MARKET_TYPES:
+        raise HTTPException(400, "Unknown market category.")
+    if not MARKET_TYPES[market_type]["auto_supported"]:
+        return {"status": "unsupported", "market_type": market_type, "paper_fills": 0,
+                "message": "This market is available for manual paper orders; reliable historical candles are not enabled for automated strategy cycles."}
+    scan = multi_market_instruments(market_type, 100)
+    if scan.get("provider_status") == "stale_cache":
+        raise HTTPException(503, "Market scan is stale; paper cycle blocked.")
+    candidates = scan.get("items", [])[:max_symbols]
+    if not candidates:
+        raise HTTPException(503, "No fresh instruments were returned; no paper cycle was executed.")
+    last_seen = dict(cfg.get("last_auto_candle_by_symbol", {}) or {})
+    actions = []
+    for candidate in candidates:
+        symbol = candidate["symbol"]
+        try:
+            candles = multi_market_candles(market_type, symbol)
+            if len(candles) < 30:
+                actions.append({"symbol": symbol, "status": "skipped", "reason": "Insufficient candle history."})
+                continue
+            candle_ts = candles[-1].get("timestamp")
+            if not candle_ts:
+                actions.append({"symbol": symbol, "status": "blocked", "reason": "Completed candle timestamp missing."})
+                continue
+            key = market_type + ":" + symbol
+            if str(last_seen.get(key, "")) >= str(candle_ts):
+                actions.append({"symbol": symbol, "status": "skipped_duplicate_candle", "candle_timestamp": candle_ts})
+                continue
+            last_seen[key] = str(candle_ts)
+            set_multi_market_setting("last_auto_candle_by_symbol", last_seen)
+            signal = combined_signal(candles)
+            side = str(signal.get("signal", "HOLD")).upper()
+            if side not in ("BUY", "SELL") or (market_type == "prediction"):
+                actions.append({"symbol": symbol, "signal": side, "status": "no_action", "reason": signal.get("reason", "No trade signal.")})
+                continue
+            if side == "SELL":
+                portfolio_value = multi_market_portfolio()
+                if not any(p["market_type"] == market_type and p["symbol"] == symbol for p in portfolio_value["positions"]):
+                    actions.append({"symbol": symbol, "signal": side, "status": "no_position"})
+                    continue
+                result = multi_market_order(MultiMarketOrderInput(
+                    market_type=market_type, symbol=symbol, side="SELL",
+                    amount_usd=1.0, sell_percent=100,
+                ))
+            else:
+                portfolio_value = multi_market_portfolio()
+                amount = min(portfolio_value["equity_usd"] * float(cfg["max_trade_pct"]) / 100,
+                             portfolio_value["virtual_cash_usd"])
+                if amount <= 0:
+                    actions.append({"symbol": symbol, "signal": side, "status": "skipped", "reason": "No virtual cash available."})
+                    continue
+                result = multi_market_order(MultiMarketOrderInput(
+                    market_type=market_type, symbol=symbol, side="BUY", amount_usd=round(amount, 4),
+                ))
+            actions.append({"symbol": symbol, "signal": side, "status": "paper_filled", "trade_id": result["trade_id"]})
+        except HTTPException as exc:
+            actions.append({"symbol": symbol, "status": "blocked_by_risk_or_data", "reason": str(exc.detail)})
+    audit("MULTI_MARKET_AUTO_CYCLE", {
+        "market_type": market_type, "symbols": [x["symbol"] for x in candidates],
+        "paper_fills": sum(x.get("status") == "paper_filled" for x in actions),
+        "live_trading": False, "actions": actions,
+    })
+    return {"status": "completed", "mode": "PAPER_ONLY", "market_type": market_type,
+            "live_trading": False, "orders_submitted": False,
+            "evaluated": len(candidates), "paper_fills": sum(x.get("status") == "paper_filled" for x in actions),
+            "actions": actions}
+
+
+@app.get("/api/multi-market/catalog")
+def multi_market_catalog():
+    cfg = multi_market_settings()
+    return {"markets": multi_market_provider.catalog(), "selected_market": cfg["selected_market"],
+            "mode": "PAPER_ONLY", "live_trading": False,
+            "note": "Each market uses public market data. Crypto automated paper trades use USDT spot candles. Prediction markets are watch/manual-paper only until validated historical candles are supported."}
+
+
+@app.get("/api/multi-market/instruments")
+def multi_market_instruments_route(market_type: str = "crypto", limit: int = 30):
+    if not 1 <= limit <= 100:
+        raise HTTPException(400, "limit must be between 1 and 100.")
+    return multi_market_instruments(market_type, limit)
+
+
+@app.get("/api/multi-market/portfolio")
+def multi_market_portfolio_route():
+    return multi_market_portfolio()
+
+
+@app.get("/api/multi-market/settings")
+def multi_market_settings_route():
+    return multi_market_settings()
+
+
+@app.patch("/api/multi-market/settings")
+def multi_market_update_settings(update: MultiMarketSettingsUpdate):
+    data = update.model_dump(exclude_none=True)
+    current = multi_market_settings()
+    if "selected_market" in data and data["selected_market"] not in MARKET_TYPES:
+        raise HTTPException(400, "selected_market is not supported.")
+    effective_market = data.get("selected_market", current["selected_market"])
+    effective_auto = data.get("auto_enabled", current["auto_enabled"])
+    if effective_auto and not MARKET_TYPES[effective_market]["auto_supported"]:
+        raise HTTPException(400, "Automated paper trading is unavailable for this category until reliable completed-candle history is implemented.")
+    if "virtual_cash_usd" in data and float(data["virtual_cash_usd"]) != float(current["virtual_cash_usd"]):
+        if rows("SELECT id FROM multi_market_trades LIMIT 1"):
+            raise HTTPException(400, "Multi-market starting cash cannot be changed after the first multi-market paper trade.")
+        data["high_water_equity_usd"] = float(data["virtual_cash_usd"])
+    for key, value in data.items():
+        set_multi_market_setting(key, value)
+    audit("MULTI_MARKET_SETTINGS_UPDATED", {**data, "live_trading": False})
+    return multi_market_settings()
+
+
+@app.post("/api/multi-market/orders")
+def multi_market_order_route(order_input: MultiMarketOrderInput):
+    return multi_market_order(order_input)
+
+
+@app.get("/api/multi-market/auto/status")
+def multi_market_auto_status():
+    cfg = multi_market_settings()
+    return {
+        "enabled": bool(cfg["auto_enabled"]), "paused": bool(cfg["paused"]),
+        "scheduler_running": bool(_multi_market_scheduler and _multi_market_scheduler.running),
+        "interval_seconds": _multi_market_scheduler.interval_seconds if _multi_market_scheduler else 60,
+        "cycles_completed": _multi_market_scheduler.cycles_completed if _multi_market_scheduler else 0,
+        "cycles_failed": _multi_market_scheduler.cycles_failed if _multi_market_scheduler else 0,
+        "last_cycle_at": _multi_market_scheduler.last_cycle_at if _multi_market_scheduler else None,
+        "last_cycle_status": _multi_market_scheduler.last_cycle_status if _multi_market_scheduler else "not_started",
+        "last_cycle_error": _multi_market_scheduler.last_cycle_error if _multi_market_scheduler else None,
+        "mode": "PAPER_ONLY", "live_trading": False,
+    }
+
+
+@app.post("/api/multi-market/auto/run")
+def multi_market_auto_run(request: MultiMarketAutoRunInput):
+    cfg = multi_market_settings()
+    if not cfg.get("auto_enabled", False):
+        raise HTTPException(400, "Enable multi-market automated paper trading first.")
+    if cfg.get("paused", False):
+        raise HTTPException(400, "Multi-market paper trading is paused.")
+    if request.market_type and request.market_type not in MARKET_TYPES:
+        raise HTTPException(400, "Unknown market category.")
+    return multi_market_auto_cycle(request.market_type or cfg["selected_market"], request.max_symbols)
+
+
+@app.get("/api/multi-market/trades")
+def multi_market_trades_route():
+    return rows("SELECT * FROM multi_market_trades ORDER BY id DESC LIMIT 100")
+
+
+@app.post("/api/multi-market/pause")
+def multi_market_pause():
+    set_multi_market_setting("paused", True)
+    audit("MULTI_MARKET_PAUSED", {"live_trading": False})
+    return {"paused": True, "mode": "PAPER_ONLY"}
+
+
+@app.post("/api/multi-market/resume")
+def multi_market_resume():
+    set_multi_market_setting("paused", False)
+    audit("MULTI_MARKET_RESUMED", {"live_trading": False})
+    return {"paused": False, "mode": "PAPER_ONLY"}
+
