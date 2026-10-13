@@ -37,20 +37,26 @@ jobs:
       - name: Validate Python syntax
         run: python -m compileall -q app tests
       - name: Validate dashboard JavaScript syntax
+        shell: python
         run: |
-          python - <<'PY'
           import re
+          import subprocess
+          import tempfile
           from pathlib import Path
 
           html = Path("app/static/index.html").read_text(encoding="utf-8")
-          scripts = re.findall(r"<script\b[^>]*>(.*?)</script>", html, re.S | re.I)
+          scripts = re.findall(r"<script\\b[^>]*>(.*?)</script>", html, re.S | re.I)
           if not scripts:
               raise SystemExit("No inline dashboard JavaScript found")
-          for index, script in enumerate(scripts, 1):
-              Path(f"/tmp/dashboard-{index}.js").write_text(script, encoding="utf-8")
-          print(f"Extracted {len(scripts)} dashboard script(s)")
-          PY
-          node --check /tmp/dashboard-1.js
+          with tempfile.TemporaryDirectory() as temp_dir:
+              script_paths = []
+              for index, script in enumerate(scripts, 1):
+                  path = Path(temp_dir) / f"dashboard-{index}.js"
+                  path.write_text(script, encoding="utf-8")
+                  script_paths.append(path)
+              print(f"Extracted {len(scripts)} dashboard script(s)")
+              for path in script_paths:
+                  subprocess.run(["node", "--check", str(path)], check=True)
       - name: Validate PowerShell launcher syntax
         if: runner.os == 'Windows'
         shell: pwsh
