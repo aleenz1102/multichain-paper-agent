@@ -1332,6 +1332,10 @@ def multi_market_order(order_input):
         )
         c.commit()
         trade_id = cursor.lastrowid
+    if side == "SELL" and qty >= current["qty"] * (1 - 1e-9):
+        risk_book = dict(multi_market_settings().get("auto_position_risk", {}) or {})
+        risk_book.pop(market_type + ":" + symbol, None)
+        set_multi_market_setting("auto_position_risk", risk_book)
     audit("MULTI_MARKET_PAPER_ORDER_FILLED", {
         "trade_id": trade_id, "market_type": market_type, "symbol": symbol,
         "side": side, "qty": qty, "price": fill_price, "currency": "USD",
@@ -1386,7 +1390,24 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
     scan = multi_market_instruments(market_type, 100)
     if scan.get("provider_status") == "stale_cache":
         raise HTTPException(503, "Market scan is stale; paper cycle blocked.")
-    candidates = scan.get("items", [])[:max_symbols]
+    scan_items = scan.get("items", [])
+    risk_book = dict(cfg.get("auto_position_risk", {}) or {})
+    # Always service bot-managed positions first, even if an instrument falls out of the
+    # current top-movers/liquidity shortlist. Missing candles or quotes still block exits.
+    managed_symbols = [
+        key.split(":", 1)[1] for key in risk_book
+        if key.startswith(market_type + ":")
+    ]
+    by_symbol = {str(item.get("symbol", "")): item for item in scan_items}
+    candidates = [
+        by_symbol.get(symbol, {"symbol": symbol, "market_type": market_type})
+        for symbol in managed_symbols
+    ]
+    candidates.extend(
+        item for item in scan_items
+        if str(item.get("symbol", "")) not in set(managed_symbols)
+    )
+    candidates = candidates[:len(managed_symbols) + max_symbols]
     if not candidates:
         raise HTTPException(503, "No fresh instruments were returned; no paper cycle was executed.")
     last_seen = dict(cfg.get("last_auto_candle_by_symbol", {}) or {})
@@ -1475,6 +1496,12 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
                 portfolio_value = multi_market_portfolio()
                 if not any(p["market_type"] == market_type and p["symbol"] == symbol for p in portfolio_value["positions"]):
                     actions.append({"symbol": symbol, "signal": side, "status": "no_position"})
+                    continue
+                if key not in risk_book:
+                    actions.append({
+                        "symbol": symbol, "signal": side, "status": "no_action",
+                        "reason": "SELL signal does not liquidate a manual position; only bot-managed positions are auto-exited.",
+                    })
                     continue
                 result = multi_market_order(MultiMarketOrderInput(
                     market_type=market_type, symbol=symbol, side="SELL",
