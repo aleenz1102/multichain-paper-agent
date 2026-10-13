@@ -36,6 +36,21 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Validate Python syntax
         run: python -m compileall -q app tests
+      - name: Validate dashboard JavaScript syntax
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          html = Path("app/static/index.html").read_text(encoding="utf-8")
+          scripts = re.findall(r"<script\\b[^>]*>(.*?)</script>", html, re.S | re.I)
+          if not scripts:
+              raise SystemExit("No inline dashboard JavaScript found")
+          for index, script in enumerate(scripts, 1):
+              Path(f"/tmp/dashboard-{index}.js").write_text(script, encoding="utf-8")
+          print(f"Extracted {len(scripts)} dashboard script(s)")
+          PY
+          node --check /tmp/dashboard-1.js
       - name: Validate PowerShell launcher syntax
         if: runner.os == 'Windows'
         shell: pwsh
