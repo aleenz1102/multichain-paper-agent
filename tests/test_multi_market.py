@@ -154,6 +154,7 @@ class MultiMarketPaperTests(unittest.TestCase):
                 "items": [{"symbol": "STKAAPL", "market_type": "stocks"}],
             }),
             patch.object(main, "multi_market_candles", return_value=candles),
+            patch.object(main, "multi_market_quote", side_effect=self.fresh_quote),
             patch.object(main, "combined_signal", return_value={"signal": "HOLD", "score": 0.0, "regime": "range_bound"}),
             patch.object(main, "multi_market_order") as place_order,
         ):
