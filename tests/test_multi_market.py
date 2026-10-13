@@ -210,5 +210,25 @@ class PublicMarketAdapterTests(unittest.TestCase):
         self.assertFalse(provider.catalog()[5]["auto_supported"])
 
 
+class MultiMarketCandleRouteTests(unittest.TestCase):
+    def test_dashboard_candle_route_returns_completed_public_data(self):
+        candles = [
+            {"timestamp": "2026-10-13T11:45:00+00:00", "open": 1.0,
+             "high": 1.2, "low": 0.9, "close": 1.1, "volume": 100.0}
+        ]
+        with patch.object(main, "multi_market_candles", return_value=candles):
+            result = main.multi_market_candles_route("crypto", "BTC")
+        self.assertEqual(result["symbol"], "BTC")
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["candles"], candles)
+        self.assertFalse(result["synthetic"])
+        self.assertEqual(result["mode"], "PUBLIC_DATA_PAPER_ONLY")
+
+    def test_dashboard_candle_route_rejects_unknown_market(self):
+        with self.assertRaises(HTTPException) as ctx:
+            main.multi_market_candles_route("unknown", "BTC")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()
