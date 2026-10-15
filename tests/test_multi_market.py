@@ -214,55 +214,38 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TypeSafePaperRankingTests(unittest.TestCase):
-    def test_missing_key_falls_back_without_sdk_call(self):
-        from app import typesafe_ranker
-        with patch.dict("os.environ", {"TYPESAFE_API_KEY": "", "TYPESAFE_RANKING_ENABLED": "1"}):
-            items, meta = typesafe_ranker.rank_candidates("crypto", [{"symbol": "BTC"}])
-        self.assertEqual(items[0]["symbol"], "BTC")
-        self.assertFalse(meta["enabled"])
-        self.assertEqual(meta["status"], "disabled")
-        self.assertIn("not configured", meta["reason"])
 
-    def test_disabled_flag_keeps_original_order(self):
-        from app import typesafe_ranker
-        sample = [{"symbol": "BTC"}, {"symbol": "ETH"}]
-        with patch.dict("os.environ", {"TYPESAFE_API_KEY": "test-only", "TYPESAFE_RANKING_ENABLED": "0"}):
-            items, meta = typesafe_ranker.rank_candidates("crypto", sample)
-        self.assertEqual([item["symbol"] for item in items], ["BTC", "ETH"])
-        self.assertFalse(meta["enabled"])
+class NativePaperOpportunityRankingTests(unittest.TestCase):
+    def test_ranks_fresh_positive_momentum_and_volume_without_external_sdk(self):
+        from app.opportunity_ranker import rank_candidates
+        sample = [
+            {"symbol": "LOW", "change_pct": -2.0, "volume": 100, "data_status": "STALE",
+             "history_status": "stale", "candle_count": 5},
+            {"symbol": "HIGH", "change_pct": 3.0, "volume": 10000, "data_status": "LIVE PUBLIC PRICE",
+             "history_status": "fresh", "candle_count": 120},
+        ]
+        ranked, meta = rank_candidates("crypto", sample)
+        self.assertEqual(ranked[0]["symbol"], "HIGH")
+        self.assertGreater(ranked[0]["opportunity_rank_score"], ranked[1]["opportunity_rank_score"])
+        self.assertIn("fresh public quote", ranked[0]["opportunity_rank_reasons"])
+        self.assertEqual(meta["provider"], "native-python")
         self.assertFalse(meta["live_trading"])
+        self.assertEqual(meta["cost"], "no AI API fees")
 
-    def test_enabled_ranking_orders_by_score_and_keeps_advisory_only(self):
-        from app import typesafe_ranker
+    def test_deterministic_tie_break_and_bounded_shortlist(self):
+        from app.opportunity_ranker import rank_candidates
+        sample = [{"symbol": "A"}, {"symbol": "B"}] + [{"symbol": str(i)} for i in range(20)]
+        ranked, meta = rank_candidates("crypto", sample)
+        self.assertEqual([x["symbol"] for x in ranked], [str(i) for i in range(12)])
+        self.assertEqual(ranked[0]["symbol"], "0")
+        self.assertEqual(meta["ranked_count"], 12)
 
-        class Answer:
-            def __init__(self, score, confidence):
-                self.score = score
-                self.confidence = confidence
-
-        class Response:
-            model = "jev-test"
-            scores = {"candidate_0": Answer(1.0, 0.8), "candidate_1": Answer(3.5, 0.9)}
-
-        class FakeClient:
-            def __init__(self, **kwargs):
-                self.kwargs = kwargs
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                return False
-            def system_one(self, **kwargs):
-                self.request = kwargs
-                return Response()
-
-        import typesafe_sdk
-        sample = [{"symbol": "BTC", "change_pct": 1.2}, {"symbol": "ETH", "change_pct": 3.4}]
-        with patch.dict("os.environ", {"TYPESAFE_API_KEY": "test-only", "TYPESAFE_RANKING_ENABLED": "1"}):
-            with patch.object(typesafe_sdk, "TypeSafeClient", FakeClient), patch.object(typesafe_sdk, "Score", side_effect=lambda **kw: kw):
-                items, meta = typesafe_ranker.rank_candidates("crypto", sample)
-        self.assertEqual([item["symbol"] for item in items], ["ETH", "BTC"])
-        self.assertEqual(items[0]["typesafe_rank_score"], 3.5)
-        self.assertEqual(meta["status"], "completed")
-        self.assertEqual(meta["model"], "jev-test")
+    def test_missing_fields_and_non_finite_values_are_safe(self):
+        from app.opportunity_ranker import rank_candidates
+        ranked, meta = rank_candidates("stocks", [
+            {"symbol": "NAN", "change_pct": float("nan"), "volume": float("inf"), "candle_count": None}
+        ])
+        self.assertEqual(len(ranked), 1)
+        self.assertTrue(0 <= ranked[0]["opportunity_rank_score"] <= 100)
+        self.assertEqual(meta["mode"], "PAPER_ONLY")
         self.assertFalse(meta["live_trading"])
