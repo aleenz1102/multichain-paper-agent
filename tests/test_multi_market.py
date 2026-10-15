@@ -232,6 +232,16 @@ class MultiMarketCandleRouteTests(unittest.TestCase):
 
 
 class DatabaseIntegrityTests(unittest.TestCase):
+    def setUp(self):
+        self.original_db = main.DB_PATH
+        self.temp = tempfile.TemporaryDirectory()
+        main.DB_PATH = Path(self.temp.name) / "integrity-test.db"
+        main.init_db()
+
+    def tearDown(self):
+        main.DB_PATH = self.original_db
+        self.temp.cleanup()
+
     def test_healthy_database_integrity_check_is_read_only(self):
         before = main.DB_PATH.stat()
         report = main.database_integrity_report()
