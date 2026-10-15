@@ -23,7 +23,7 @@ main>section:not(#multiMarketPanel){display:none!important}
 </style></head><body>
 <header><div class="brand"><div class="bot">◉</div><div><h1>MULTICHAIN PAPER AGENT</h1><div class="sub">RESEARCH  |  SIMULATE  |  ANALYZE  |  IMPROVE</div></div></div><div class="row"><span class="banner">● PAPER MODE  |  LIVE ORDERS DISABLED</span><span class="pill" id="feedstatus">DEMO FEED</span><span class="small" id="clock"></span></div></header>
 <main>
-<div class="row spread"><div class="row"><span class="pill">DASHBOARD</span><span class="pill">RISK-FIRST</span><span class="pill">CRYPTO  |  EXTENSIBLE</span></div><div class="row"><span class="small" id="engineStatus">Checking engine...</span><button class="danger" onclick="pauseEngine()">KILL SWITCH</button><button class="safe" onclick="resumeEngine()">RESUME PAPER</button></div></div>
+<div class="row spread"><div class="row"><span class="pill">DASHBOARD</span><span class="pill">RISK-FIRST</span><span class="pill">CRYPTO  |  EXTENSIBLE</span></div><div class="row"><span class="small" id="engineStatus">Checking engine...</span><button class="danger" onclick="pauseMultiMarket()">PAUSE PAPER</button><button class="safe" onclick="resumeMultiMarket()">RESUME PAPER</button></div></div>
 <section class="stats">
 <div class="card stat"><div class="label">Portfolio value</div><div class="value" id="equity">₹100,000</div><div class="sub">Virtual balance only</div></div>
 <div class="card" style="border-color:var(--green)"><div class="label">Paper P&L</div><div class="value positive" id="pnl">₹0</div><div class="sub" id="pnlPct">Simulated returns</div></div>
@@ -32,7 +32,8 @@ main>section:not(#multiMarketPanel){display:none!important}
 <div class="card" style="border-color:var(--green)"><div class="label">Risk status</div><div class="value positive" id="riskStatus">SAFE</div><div class="sub">Backend-enforced limits</div></div>
 </section>
 <section class="card" id="multiMarketPanel">
-<div class="row spread"><div><h2>Multi-market paper terminal</h2><div class="small">Autonomous paper engine scans every supported market category on a bounded cycle. Prediction markets remain manual-only until candle history is validated. Separate $30 USD paper ledger; existing crypto history is preserved.</div></div><span class="pill">PAPER ONLY · NO LIVE ORDERS</span></div>
+<div class="row spread"><div><h2>Active paper-trading account · USD</h2><div class="small">The active Auto Trader ledger is denominated in virtual USD, starts at $30, and is shared across supported markets. The older INR crypto ledger and its complete history are preserved separately; balances are never merged or converted.</div></div><span class="pill">PAPER ONLY · NO LIVE ORDERS</span></div>
+<div class="notice" id="databaseStatus" role="status">Checking database integrity before showing balances or enabling paper orders...</div>
 <div class="controls" style="margin-top:12px">
  <div class="field"><label>Market</label><select id="mmMarketType">
   <option value="crypto">Crypto · USDT spot</option><option value="stocks">Stocks</option><option value="forex">Forex · USD-quoted majors</option><option value="commodities">Commodities · futures references</option><option value="indices">Indices</option><option value="prediction">Prediction markets</option>
@@ -40,11 +41,11 @@ main>section:not(#multiMarketPanel){display:none!important}
  <div class="field"><label>Paper automation</label><label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="mmAutoEnabled" class="switch" type="checkbox"> Auto-paper supported markets</label></div>
  <div class="field"><label>Controls</label><div class="row"><button onclick="saveMultiMarketSettings()">Save / apply</button><button class="danger" onclick="pauseMultiMarket()">Pause</button><button class="safe" onclick="resumeMultiMarket()">Resume</button></div></div>
 </div>
-<div id="mmStatus" class="notice" style="margin-top:10px">Loading public market instruments...</div>
+<div id="mmStatus" class="notice" style="margin-top:10px">Checking SQLite integrity and loading the USD paper ledger...</div>
 <div class="stats" style="margin-top:10px">
- <div class="card stat"><div class="label">Multi-market equity</div><div class="value" id="mmEquity">$30.00</div><div class="sub">Independent virtual USD account</div></div>
- <div class="card"><div class="label">Available cash</div><div class="value" id="mmCash">$30.00</div><div class="sub">Virtual funds only</div></div>
- <div class="card"><div class="label">Net paper P&amp;L</div><div class="value" id="mmPnL">$0.00</div><div class="sub" id="mmPnLPct">No simulated trades yet</div></div>
+ <div class="card stat"><div class="label">Multi-market equity</div><div class="value" id="mmEquity">—</div><div class="sub">Independent virtual USD account</div></div>
+ <div class="card"><div class="label">Available cash</div><div class="value" id="mmCash">—</div><div class="sub">Virtual funds only</div></div>
+ <div class="card"><div class="label">Net paper P&amp;L</div><div class="value" id="mmPnL">—</div><div class="sub" id="mmPnLPct">No simulated trades yet</div></div>
  <div class="card"><div class="label">Open positions</div><div class="value" id="mmPositionCount">0</div><div class="sub" id="mmRiskStatus">Risk limits active</div></div>
  <div class="card"><div class="label">Automation status</div><div class="value" id="mmAutoStatus">OFF</div><div class="sub" id="mmAutoCycles">Waiting for scheduler health...</div><div class="sub" id="mmManagedPositions">0 bot-managed positions</div></div>
 </div>
@@ -61,7 +62,7 @@ main>section:not(#multiMarketPanel){display:none!important}
     <div class="field"><label>Side</label><select id="mmSide"><option>BUY</option><option>SELL</option></select></div>
     <div class="field"><label>USD notional</label><input id="mmAmount" type="number" min="0.1" step="0.1" value="0.9"></div>
    </div>
-   <div class="row" style="margin-top:10px"><button class="safe" onclick="placeMultiMarketOrder()">Simulate order</button><button onclick="sellMultiMarketPercent(50)">Sell 50%</button><button onclick="sellMultiMarketPercent(100)">Sell all</button></div><div class="message" id="mmOrderMessage"></div>
+   <div class="row" style="margin-top:10px"><button id="mmOrderSubmit" class="safe" onclick="placeMultiMarketOrder()" disabled>Simulate order</button><button id="mmSell50" onclick="sellMultiMarketPercent(50)" disabled>Sell 50%</button><button id="mmSellAll" onclick="sellMultiMarketPercent(100)" disabled>Sell all</button></div><div class="message" id="mmOrderMessage"></div>
    <div class="small" style="margin-top:8px">Max trade: 3% · Daily loss stop: 3% · Max drawdown: 8% · Max exposure: 30% · One market-independent $30 virtual USD balance shared by these categories.</div>
   </div>
   <div class="card"><h2>Cross-market positions</h2><div class="tablewrap" style="max-height:220px;min-height:60px;overflow:auto"><table><thead><tr><th>Market</th><th>Instrument</th><th>Qty</th><th>Mark</th><th>Unrealized P&amp;L</th></tr></thead><tbody id="mmPositions"><tr><td colspan="5">No positions</td></tr></tbody></table></div><div class="small" id="mmValuationStatus">Valuation pending.</div></div>
@@ -342,8 +343,28 @@ function mmPrice(x){
  const p=Number(x.price||0);
  return p>=1000?num(p,2):p>=1?num(p,4):num(p,8);
 }
+function setPaperOrderControlsEnabled(enabled){
+ for(const id of ['mmOrderSubmit','mmSell50','mmSellAll'])$(id).disabled=!enabled;
+}
+function hideUnverifiedBalances(){
+ for(const id of ['mmEquity','mmCash','mmPnL'])$(id).textContent='—';
+ setPaperOrderControlsEnabled(false);
+}
 async function loadMultiMarket(){
  try{
+  setPaperOrderControlsEnabled(false);
+  const health=await api('/api/health');
+  if(!health.ok||!health.database||!health.database.ok||!health.paper_trading_enabled){
+   hideUnverifiedBalances();
+   const detail=(health.database&&Array.isArray(health.database.issues)?health.database.issues.join('; '):health.message||'database check failed');
+   $('databaseStatus').textContent='DATABASE CHECK FAILED — paper orders blocked. '+detail+' Preserve the database and backups; do not reset.';
+   $('databaseStatus').className='notice negative';
+   $('mmStatus').textContent='Balances not displayed because database integrity is unconfirmed.';
+   $('mmOrderMessage').textContent='Paper order controls are disabled until the database is verified.';
+   return;
+  }
+  $('databaseStatus').textContent='DATABASE OK · SQLite integrity and saved ledger values validated. Active account: virtual USD. Legacy INR ledger remains separate.';
+  $('databaseStatus').className='notice';
   const saved=await api('/api/multi-market/settings');
   if(!mmInitialized){
    if(saved.selected_market)$('mmMarketType').value=saved.selected_market;
@@ -388,9 +409,12 @@ async function loadMultiMarket(){
   $('mmManagedPositions').textContent=(auto.managed_positions||0)+' bot-managed positions · '+(summary.markets_scanned||0)+' markets scanned · '+(summary.paper_fills||0)+' fills last sweep';
   if(type==='prediction'&&$('mmAutoEnabled').checked)$('mmAutoEnabled').checked=false;
   $('mmAutoEnabled').disabled=type==='prediction';
+  setPaperOrderControlsEnabled(!!s.valuation_complete);
  }catch(e){
-  $('mmStatus').textContent='Market data unavailable: '+e.message;
-  $('mmInstrumentRows').innerHTML='<tr><td colspan="6" class="negative">No fresh public data. Paper actions are unavailable until the feed recovers.</td></tr>';
+  hideUnverifiedBalances();
+  if($('databaseStatus')){$('databaseStatus').textContent='STATUS UNKNOWN — '+e.message+' No balance is shown and paper orders are disabled until checks succeed.';$('databaseStatus').className='notice negative';}
+  $('mmStatus').textContent='Data / account unavailable: '+e.message;
+  $('mmInstrumentRows').innerHTML='<tr><td colspan="6" class="negative">No verified account state. Paper actions are unavailable until database and market checks recover.</td></tr>';
  }
 }
 function drawMultiMarketCandles(candles){
