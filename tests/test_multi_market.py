@@ -240,6 +240,14 @@ class NativePaperOpportunityRankingTests(unittest.TestCase):
         self.assertEqual(ranked[0]["symbol"], "0")
         self.assertEqual(meta["ranked_count"], 12)
 
+    def test_protected_open_position_is_not_dropped_from_shortlist(self):
+        from app.opportunity_ranker import rank_candidates
+        sample = [{"symbol": str(i), "change_pct": 0} for i in range(15)]
+        ranked, meta = rank_candidates("crypto", sample, protected_symbols=["14"])
+        self.assertIn("14", [item["symbol"] for item in ranked])
+        self.assertEqual(len(ranked), 12)
+        self.assertFalse(meta["live_trading"])
+
     def test_missing_fields_and_non_finite_values_are_safe(self):
         from app.opportunity_ranker import rank_candidates
         ranked, meta = rank_candidates("stocks", [
