@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -283,6 +284,20 @@ class DatabaseIntegrityTests(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertTrue(any("multi_market_settings.virtual_cash_usd" in issue for issue in report["issues"]))
 
+    def test_empty_existing_sqlite_file_is_not_silently_initialized(self):
+        empty = main.DB_PATH.parent / "empty-existing.db"
+        with sqlite3.connect(empty):
+            pass
+        original_path = main.DB_PATH
+        try:
+            main.DB_PATH = empty
+            before = empty.read_bytes()
+            with self.assertRaises(main.PaperDatabaseIntegrityError):
+                main.init_db()
+            self.assertEqual(empty.read_bytes(), before)
+        finally:
+            main.DB_PATH = original_path
+            empty.unlink(missing_ok=True)
     def test_corrupt_sqlite_file_is_never_reinitialized_or_overwritten(self):
         broken = main.DB_PATH.parent / "deliberately-corrupt.db"
         payload = b"not a valid sqlite database - preserve me"
