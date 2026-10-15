@@ -234,7 +234,7 @@ class NativePaperOpportunityRankingTests(unittest.TestCase):
 
     def test_deterministic_tie_break_and_bounded_shortlist(self):
         from app.opportunity_ranker import rank_candidates
-        sample = [{"symbol": "A"}, {"symbol": "B"}] + [{"symbol": str(i)} for i in range(20)]
+        sample = [{"symbol": str(i)} for i in range(22)]
         ranked, meta = rank_candidates("crypto", sample)
         self.assertEqual([x["symbol"] for x in ranked], [str(i) for i in range(12)])
         self.assertEqual(ranked[0]["symbol"], "0")
