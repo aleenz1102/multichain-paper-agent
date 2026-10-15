@@ -2,7 +2,7 @@ from __future__ import annotations
 import json, math, os, re, sqlite3, time
 from datetime import datetime, timezone, date
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from typing import Optional
 from threading import Lock, RLock
 from urllib.request import Request, urlopen
@@ -106,7 +106,7 @@ def database_integrity_report(require_schema: bool = True):
         return {"ok": False, "status": "missing_database", "issues": ["database file is missing"]}
     try:
         uri = DB_PATH.resolve().as_uri() + "?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=3) as c:
+        with closing(sqlite3.connect(uri, uri=True, timeout=3)) as c:
             checks = [str(row[0]).lower() for row in c.execute("PRAGMA quick_check").fetchall()]
             if not checks or checks != ["ok"]:
                 return {"ok": False, "status": "sqlite_integrity_error",
