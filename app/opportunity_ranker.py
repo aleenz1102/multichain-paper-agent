@@ -22,9 +22,18 @@ def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, value))
 
 
-def rank_candidates(market_type: str, candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Rank up to 12 snapshots; use deterministic tie-breaking by original order."""
-    items = [dict(item) for item in candidates[:12]]
+def rank_candidates(market_type: str, candidates: list[dict[str, Any]], protected_symbols: list[str] | tuple[str, ...] = ()) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Rank up to 12 snapshots while retaining every protected open-position symbol."""
+    protected = set(protected_symbols)
+    protected_items = [dict(item) for item in candidates if str(item.get("symbol", "")) in protected]
+    protected_names = {str(item.get("symbol", "")) for item in protected_items}
+    remaining = [dict(item) for item in candidates if str(item.get("symbol", "")) not in protected_names]
+    slots = max(0, 12 - len(protected_items))
+    items = protected_items + remaining[:slots]
+    # A valid configuration has at most three managed positions; keep all protected
+    # positions even if an upstream caller ever exceeds the normal 12-item bound.
+    if len(protected_items) > 12:
+        items = protected_items
     volumes = [_finite_number(item.get("volume")) for item in items]
     valid_volumes = [max(0.0, value) for value in volumes if value is not None]
     max_volume = max(valid_volumes, default=0.0)
