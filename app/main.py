@@ -114,8 +114,13 @@ def database_integrity_report(require_schema: bool = True):
             tables = {row[0] for row in c.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()}
+            # A non-empty SQLite file with no application tables is not a new database.
+            # Refuse to initialize it, because it may be the wrong path or a damaged ledger.
+            issues = []
+            if not tables:
+                issues.append("existing database contains no application tables")
             missing = sorted(_DB_REQUIRED_TABLES - tables) if require_schema else []
-            issues = [f"missing required table: {name}" for name in missing]
+            issues.extend(f"missing required table: {name}" for name in missing)
             for table in ("settings", "multi_market_settings"):
                 if table not in tables:
                     continue
