@@ -3,7 +3,7 @@
 The multi-market paper engine uses deterministic local Python scoring. No AI provider,
 API key, model download, or additional package is required.
 
-The ranker orders a bounded shortlist (up to 12 instruments) using the market snapshot
+The ranker orders a bounded shortlist (up to 12 instruments), while retaining every symbol with a bot-managed open position, using the market snapshot
 fields available from public-data adapters:
 
 - 40%: reported 24-hour momentum, capped so extreme moves do not dominate.
