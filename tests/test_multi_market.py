@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -208,6 +209,111 @@ class PublicMarketAdapterTests(unittest.TestCase):
     def test_prediction_markets_are_explicitly_not_auto_supported(self):
         provider = PublicMultiMarketProvider()
         self.assertFalse(provider.catalog()[5]["auto_supported"])
+
+
+class MultiMarketCandleRouteTests(unittest.TestCase):
+    def test_dashboard_candle_route_returns_completed_public_data(self):
+        candles = [
+            {"timestamp": "2026-10-13T11:45:00+00:00", "open": 1.0,
+             "high": 1.2, "low": 0.9, "close": 1.1, "volume": 100.0}
+        ]
+        with patch.object(main, "multi_market_candles", return_value=candles):
+            result = main.multi_market_candles_route("crypto", "BTC")
+        self.assertEqual(result["symbol"], "BTC")
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["candles"], candles)
+        self.assertFalse(result["synthetic"])
+        self.assertEqual(result["mode"], "PUBLIC_DATA_PAPER_ONLY")
+
+    def test_dashboard_candle_route_rejects_unknown_market(self):
+        with self.assertRaises(HTTPException) as ctx:
+            main.multi_market_candles_route("unknown", "BTC")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
+
+class DatabaseIntegrityTests(unittest.TestCase):
+    def setUp(self):
+        self.original_db = main.DB_PATH
+        self.temp = tempfile.TemporaryDirectory()
+        main.DB_PATH = Path(self.temp.name) / "integrity-test.db"
+        main.init_db()
+
+    def tearDown(self):
+        main.DB_PATH = self.original_db
+        self.temp.cleanup()
+
+    def test_healthy_database_integrity_check_is_read_only(self):
+        before = main.DB_PATH.stat()
+        report = main.database_integrity_report()
+        after = main.DB_PATH.stat()
+        self.assertTrue(report["ok"], report)
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(before.st_size, after.st_size)
+        self.assertEqual(before.st_mtime_ns, after.st_mtime_ns)
+
+    def test_invalid_saved_balance_json_blocks_orders_and_health_reports_failure(self):
+        with main.connect() as c:
+            c.execute(
+                "UPDATE settings SET value=? WHERE key='virtual_cash'",
+                ("not-valid-json",),
+            )
+            c.commit()
+        report = main.database_integrity_report()
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["status"], "data_validation_error")
+        self.assertTrue(any("settings.virtual_cash" in issue for issue in report["issues"]))
+        health = main.health()
+        self.assertFalse(health["ok"])
+        self.assertFalse(health["paper_trading_enabled"])
+        with self.assertRaises(HTTPException) as error:
+            main.multi_market_order(main.MultiMarketOrderInput(
+                market_type="crypto", symbol="BTC", side="BUY", amount_usd=0.5,
+            ))
+        self.assertEqual(error.exception.status_code, 503)
+        self.assertEqual(len(main.rows("SELECT id FROM multi_market_trades")), 0)
+
+    def test_non_finite_virtual_balance_is_marked_corrupt(self):
+        with main.connect() as c:
+            c.execute(
+                "UPDATE multi_market_settings SET value=? WHERE key='virtual_cash_usd'",
+                ("NaN",),
+            )
+            c.commit()
+        report = main.database_integrity_report()
+        self.assertFalse(report["ok"])
+        self.assertTrue(any("multi_market_settings.virtual_cash_usd" in issue for issue in report["issues"]))
+
+    def test_empty_existing_sqlite_file_is_not_silently_initialized(self):
+        empty = main.DB_PATH.parent / "empty-existing.db"
+        # Use a separate connection and close it before validation, so Windows
+        # does not keep a file handle open through the context manager.
+        connection = sqlite3.connect(empty)
+        connection.close()
+        original_path = main.DB_PATH
+        try:
+            main.DB_PATH = empty
+            before = empty.read_bytes()
+            with self.assertRaises(main.PaperDatabaseIntegrityError):
+                main.init_db()
+            self.assertEqual(empty.read_bytes(), before)
+        finally:
+            main.DB_PATH = original_path
+            empty.unlink(missing_ok=True)
+    def test_corrupt_sqlite_file_is_never_reinitialized_or_overwritten(self):
+        broken = main.DB_PATH.parent / "deliberately-corrupt.db"
+        payload = b"not a valid sqlite database - preserve me"
+        broken.write_bytes(payload)
+        original_path = main.DB_PATH
+        try:
+            main.DB_PATH = broken
+            before = broken.read_bytes()
+            with self.assertRaises(main.PaperDatabaseIntegrityError):
+                main.init_db()
+            self.assertEqual(broken.read_bytes(), before)
+        finally:
+            main.DB_PATH = original_path
+            broken.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

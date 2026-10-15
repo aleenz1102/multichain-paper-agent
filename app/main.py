@@ -2,7 +2,7 @@ from __future__ import annotations
 import json, math, os, re, sqlite3, time
 from datetime import datetime, timezone, date
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from typing import Optional
 from threading import Lock, RLock
 from urllib.request import Request, urlopen
@@ -81,7 +81,112 @@ def connect():
         yield c
     finally:
         c.close()
+class PaperDatabaseIntegrityError(RuntimeError):
+    """Saved paper-trading data failed read-only validation; do not auto-repair it."""
+
+
+_DB_REQUIRED_TABLES = {
+    "settings", "trades", "audit", "cash_adjustments",
+    "multi_market_settings", "multi_market_trades",
+}
+_DB_NUMERIC_COLUMNS = {
+    "trades": ("qty", "price", "notional", "fee", "slippage_cost", "realized_pnl"),
+    "multi_market_trades": ("qty", "price", "notional", "fee", "slippage_cost", "realized_pnl"),
+    "cash_adjustments": ("amount",),
+}
+_DB_CASH_BOUNDS = {
+    ("settings", "virtual_cash"): (1.0, 100000000.0),
+    ("multi_market_settings", "virtual_cash_usd"): (1.0, 1000000.0),
+}
+
+
+def database_integrity_report(require_schema: bool = True):
+    """Read-only SQLite and stored-value checks. It never creates, resets, or repairs the DB."""
+    if not DB_PATH.exists():
+        return {"ok": False, "status": "missing_database", "issues": ["database file is missing"]}
+    try:
+        uri = DB_PATH.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=3)) as c:
+            checks = [str(row[0]).lower() for row in c.execute("PRAGMA quick_check").fetchall()]
+            if not checks or checks != ["ok"]:
+                return {"ok": False, "status": "sqlite_integrity_error",
+                        "issues": ["SQLite quick_check failed; database and backups were not changed"]}
+            tables = {row[0] for row in c.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            # A non-empty SQLite file with no application tables is not a new database.
+            # Refuse to initialize it, because it may be the wrong path or a damaged ledger.
+            issues = []
+            if not tables:
+                issues.append("existing database contains no application tables")
+            missing = sorted(_DB_REQUIRED_TABLES - tables) if require_schema else []
+            issues.extend(f"missing required table: {name}" for name in missing)
+            for table in ("settings", "multi_market_settings"):
+                if table not in tables:
+                    continue
+                parsed = {}
+                for key, raw in c.execute(f'SELECT key, value FROM "{table}"').fetchall():
+                    try:
+                        parsed[str(key)] = json.loads(raw)
+                    except (ValueError, TypeError, json.JSONDecodeError):
+                        issues.append(f"invalid JSON setting: {table}.{key}")
+                for (balance_table, key), (minimum, maximum) in _DB_CASH_BOUNDS.items():
+                    if table != balance_table or key not in parsed:
+                        continue
+                    value = parsed[key]
+                    if (isinstance(value, bool) or not isinstance(value, (int, float))
+                            or not math.isfinite(float(value)) or not minimum <= float(value) <= maximum):
+                        issues.append(f"invalid virtual balance setting: {table}.{key}")
+            for table, columns in _DB_NUMERIC_COLUMNS.items():
+                if table not in tables:
+                    continue
+                query = "SELECT " + ", ".join(f'"{column}"' for column in columns)
+                query += f' FROM "{table}"'
+                for row_index, values in enumerate(c.execute(query)):
+                    if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
+                               and math.isfinite(float(value)) for value in values):
+                        issues.append(f"non-finite/non-numeric value in {table} row {row_index + 1}")
+                        break
+            for table in ("trades", "multi_market_trades"):
+                if table not in tables:
+                    continue
+                query = f'SELECT side, qty, price, notional, fee, slippage_cost FROM "{table}"'
+                for row_index, row in enumerate(c.execute(query)):
+                    side, qty, price, notional, fee, slippage_cost = row
+                    if side not in ("BUY", "SELL") or qty <= 0 or price <= 0 or notional < 0 or fee < 0 or slippage_cost < 0:
+                        issues.append(f"invalid trade ledger values in {table} row {row_index + 1}")
+                        break
+            if "cash_adjustments" in tables:
+                for row_index, row in enumerate(c.execute("SELECT amount FROM cash_adjustments")):
+                    amount = row[0]
+                    if (not isinstance(amount, (int, float)) or isinstance(amount, bool)
+                            or not math.isfinite(float(amount)) or amount <= 0):
+                        issues.append(f"invalid virtual top-up value in cash_adjustments row {row_index + 1}")
+                        break
+            if issues:
+                return {"ok": False, "status": "data_validation_error", "issues": issues[:20]}
+            return {"ok": True, "status": "ok", "issues": [], "sqlite_check": "ok",
+                    "database_file": DB_PATH.name, "live_trading": False}
+    except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+        return {"ok": False, "status": "database_unreadable",
+                "issues": [f"Read-only database check failed ({type(exc).__name__}); original file preserved"]}
+
+
+def ensure_database_healthy():
+    report = database_integrity_report()
+    if not report["ok"]:
+        raise HTTPException(503, "Paper database integrity check failed. Paper trading is blocked; preserve the original database and backups for recovery.")
+    return report
+
+
 def init_db():
+    # Preflight an existing database read-only before schema initialization.
+    if DB_PATH.exists():
+        report = database_integrity_report(require_schema=False)
+        if not report["ok"]:
+            raise PaperDatabaseIntegrityError(
+                "Existing paper database failed integrity validation; original file preserved."
+            )
     with connect() as c:
         c.execute("""CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
         c.execute("""CREATE TABLE IF NOT EXISTS trades (
@@ -113,11 +218,15 @@ def init_db():
                       (key, json.dumps(value)))
         c.commit()
 def settings():
-    with connect() as c: rows=c.execute("SELECT key,value FROM settings").fetchall()
-    out=DEFAULTS.copy()
-    for r in rows:
-        try: out[r["key"]]=json.loads(r["value"])
-        except Exception: pass
+    ensure_database_healthy()
+    with connect() as c:
+        stored = c.execute("SELECT key,value FROM settings").fetchall()
+    out = DEFAULTS.copy()
+    for row in stored:
+        try:
+            out[row["key"]] = json.loads(row["value"])
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(503, "Paper settings contain unreadable saved data; trading is blocked.") from exc
     return out
 def set_setting(k,v):
     with connect() as c:
@@ -287,7 +396,7 @@ def startup():
     global _auto_scheduler, _multi_market_scheduler
     init_db()
     _auto_scheduler = PaperAutoScheduler(
-        enabled=lambda: bool(settings().get("auto_monitor_enabled", False)),
+        enabled=lambda: bool(database_integrity_report()["ok"] and settings().get("auto_monitor_enabled", False)),
         paused=lambda: bool(settings().get("paused", False)),
         run_cycle=lambda: auto_trade_run(AutoMonitorEvaluation()),
         audit=audit,
@@ -295,7 +404,7 @@ def startup():
     )
     _auto_scheduler.start()
     _multi_market_scheduler = PaperAutoScheduler(
-        enabled=lambda: bool(multi_market_settings().get("auto_enabled", False)),
+        enabled=lambda: bool(database_integrity_report()["ok"] and multi_market_settings().get("auto_enabled", False)),
         paused=lambda: bool(multi_market_settings().get("paused", False)),
         run_cycle=lambda: multi_market_auto_cycle_all(max_symbols=2),
         audit=audit,
@@ -313,13 +422,26 @@ def shutdown():
 def home(): return (ROOT/"static"/"index.html").read_text(encoding="utf-8")
 @app.get("/api/health")
 def health():
-    mode = settings().get("market_data_mode", "synthetic")
+    integrity = database_integrity_report()
+    if not integrity["ok"]:
+        return {
+            "ok": False, "mode": "PAPER_ONLY", "database": integrity,
+            "paper_trading_enabled": False, "live_trading": False,
+            "message": "Database integrity is not confirmed; paper trading is blocked.",
+        }
+    try:
+        mode = settings().get("market_data_mode", "synthetic")
+    except HTTPException:
+        return {
+            "ok": False, "mode": "PAPER_ONLY", "database": database_integrity_report(),
+            "paper_trading_enabled": False, "live_trading": False,
+            "message": "Saved settings could not be read; paper trading is blocked.",
+        }
     return {
-        "ok": True,
-        "mode": "PAPER_ONLY",
+        "ok": True, "mode": "PAPER_ONLY",
         "data": "LIVE PUBLIC DATA CONFIGURED" if mode == "live_public" else "SYNTHETIC DEMO",
-        "market_data_mode": mode,
-        "live_trading": False,
+        "market_data_mode": mode, "database": integrity,
+        "paper_trading_enabled": True, "live_trading": False,
     }
 @app.get("/api/market")
 def get_market():
@@ -458,6 +580,8 @@ def get_trades(): return rows("SELECT * FROM trades ORDER BY id DESC LIMIT 100")
 def get_audit(): return rows("SELECT * FROM audit ORDER BY id DESC LIMIT 100")
 @app.post("/api/orders")
 def order(o: Order):
+    # Never make a paper fill while the stored ledger is not validated.
+    ensure_database_healthy()
     # Serialize check-and-fill to prevent concurrent requests bypassing cash/exposure limits.
     with _order_lock:
         s = settings()
@@ -638,6 +762,7 @@ def auto_monitor_evaluate(request: AutoMonitorEvaluation):
 @app.post("/api/auto-trade/run")
 def auto_trade_run(request: AutoMonitorEvaluation):
     """One bounded automated paper-trading cycle; never sends external orders."""
+    ensure_database_healthy()
     if not _auto_cycle_lock.acquire(blocking=False):
         raise HTTPException(409, "An automated paper cycle is already in progress.")
     try:
@@ -1089,9 +1214,13 @@ _multi_market_scheduler: PaperAutoScheduler | None = None
 
 
 def multi_market_settings():
-    with connect() as c:
-        stored = {r["key"]: json.loads(r["value"])
-                  for r in c.execute("SELECT key,value FROM multi_market_settings").fetchall()}
+    ensure_database_healthy()
+    try:
+        with connect() as c:
+            stored = {row["key"]: json.loads(row["value"])
+                      for row in c.execute("SELECT key,value FROM multi_market_settings").fetchall()}
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(503, "Multi-market settings contain unreadable saved data; trading is blocked.") from exc
     return {**MULTI_MARKET_DEFAULTS, **stored}
 
 
@@ -1265,6 +1394,7 @@ def multi_market_portfolio():
 
 
 def multi_market_order(order_input):
+    ensure_database_healthy()
     cfg = multi_market_settings()
     if cfg["paused"]:
         raise HTTPException(400, "Multi-market paper trading is paused.")
@@ -1376,6 +1506,7 @@ class MultiMarketAutoRunInput(BaseModel):
 
 
 def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6):
+    ensure_database_healthy()
     cfg = multi_market_settings()
     market_type = market_type or cfg.get("selected_market", "crypto")
     if not cfg.get("auto_enabled", False):
@@ -1612,6 +1743,24 @@ def multi_market_instruments_route(market_type: str = "crypto", limit: int = 30)
     if not 1 <= limit <= 100:
         raise HTTPException(400, "limit must be between 1 and 100.")
     return multi_market_instruments(market_type, limit)
+
+
+@app.get("/api/multi-market/candles")
+def multi_market_candles_route(market_type: str = "crypto", symbol: str = "BTC"):
+    """Return completed public candles for the dashboard; never synthesize chart data."""
+    if market_type not in MARKET_TYPES:
+        raise HTTPException(400, "Unknown market category.")
+    symbol = str(symbol).strip().upper()
+    candles = multi_market_candles(market_type, symbol)
+    if not isinstance(candles, list) or not candles:
+        raise HTTPException(503, "No completed candle history available.")
+    latest = candles[-1].get("timestamp")
+    return {
+        "market_type": market_type, "symbol": symbol, "candles": candles,
+        "count": len(candles), "latest_at": latest,
+        "interval": "5m" if market_type == "crypto" else "provider interval",
+        "mode": "PUBLIC_DATA_PAPER_ONLY", "synthetic": False,
+    }
 
 
 @app.get("/api/multi-market/portfolio")

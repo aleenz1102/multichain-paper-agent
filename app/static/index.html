@@ -3,12 +3,27 @@
 <title>Multi-Chain Paper Agent</title>
 <style>
 :root{color-scheme:dark;--bg:#050914;--panel:#080f20;--line:#3b1749;--pink:#ff26c9;--cyan:#24e5ff;--green:#00f0a0;--red:#ff456f;--muted:#8da2c2;--text:#edf6ff;--amber:#ffb53d}
+/* Simplified mobile-first paper desk: keep the multi-market workflow as the home screen. */
+main{max-width:1280px;padding:12px;gap:12px}
+main>section:not(#multiMarketPanel){display:none!important}
+#multiMarketPanel{display:block!important;border-color:#26354d;background:#0b1220;box-shadow:none}
+#multiMarketPanel .small{font-size:12px}
+#multiMarketPanel .card{border-color:#26354d;box-shadow:none;background:#0e1728}
+#multiMarketPanel h2{font-size:14px;letter-spacing:0;text-transform:none;color:#f1f5f9}
+#multiMarketPanel .pill{border-color:#334155;background:#162236}
+#multiMarketPanel .controls{display:flex;flex-wrap:wrap;gap:10px}
+#multiMarketPanel .layout{grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr)}
+#mmChart{width:100%;height:260px;display:block}
+#mmChartCard{margin-top:12px}
+#mmChartMeta{font-size:12px}
+#multiMarketPanel .tablewrap{max-height:360px}
+@media(max-width:760px){main{padding:8px}#multiMarketPanel .layout{grid-template-columns:1fr}#multiMarketPanel .stats{grid-template-columns:repeat(2,minmax(0,1fr))}#mmChart{height:210px}header{padding:12px}h1{font-size:17px}}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 20% 0,#21103a 0,transparent 35%),#040711;color:var(--text);font:13px/1.45 Inter,Segoe UI,system-ui,Arial}header{height:auto;min-height:66px;padding:14px 20px;border-bottom:1px solid var(--pink);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:#080714;box-shadow:0 0 22px #ff26c933}h1{font-size:19px;letter-spacing:.06em;margin:0;color:#fff;text-shadow:0 0 15px var(--pink)}h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;margin:0 0 13px;color:#f4eaff}.sub,.small{font-size:11px;color:var(--muted)}.brand{display:flex;align-items:center;gap:12px}.bot{font-size:26px;color:var(--cyan);filter:drop-shadow(0 0 7px var(--cyan))}.banner,.pill{border:1px solid var(--pink);padding:6px 10px;border-radius:5px;font-size:10px;letter-spacing:.08em;font-weight:800;color:#fff;background:#ff26c916}.banner{border-color:var(--green);color:var(--green)}main{max-width:1800px;margin:auto;padding:15px;display:grid;gap:12px}.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(320px,.9fr);gap:12px}.card{min-width:0;background:linear-gradient(145deg,#0a1426,#080b18);border:1px solid var(--pink);border-radius:9px;padding:14px;box-shadow:0 0 12px #ff26c91a,inset 0 0 20px #1b0d261c}.stat{border:1px solid var(--cyan);box-shadow:0 0 12px #24e5ff24}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.11em}.value{font-size:clamp(19px,2vw,27px);font-weight:800;margin-top:7px;overflow-wrap:anywhere}.positive{color:var(--green)}.negative{color:var(--red)}.muted{color:var(--muted)}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.spread{justify-content:space-between}.tablewrap{overflow:auto;max-height:none;min-height:280px;flex:1;overscroll-behavior:contain}.market-card{display:flex;flex-direction:column;min-height:520px;height:min(76vh,900px)}.market-card .tablewrap{min-height:0}.market-card .tablewrap table tbody tr{cursor:pointer}.market-card .tablewrap tbody tr:hover{background:#132038}.market-card .tablewrap tbody tr.selected{background:#112b3b;outline:1px solid var(--cyan)}.market-detail{margin-top:12px;border:1px solid #24415a;border-radius:7px;padding:12px;background:#060c18}.detail-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.detail-stat{padding:8px;border:1px solid #1d2940;border-radius:5px;min-width:0}.detail-stat .value{font-size:16px}.candle-wrap{height:280px;overflow:hidden;margin-top:10px;background:linear-gradient(#0b1322,#070b15);border-radius:5px}.candle-wrap svg{width:100%;height:100%;display:block}.market-toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.market-toolbar button.active{border-color:var(--cyan);color:var(--cyan)}.signal-copy{white-space:normal;overflow-wrap:anywhere}@media(max-width:1000px){.market-card{height:auto;min-height:0}.market-card .tablewrap{max-height:55vh;min-height:260px}.detail-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.candle-wrap{height:230px}}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #1d2940;font-size:11px}th{position:sticky;top:0;background:#080d1b;color:#91a8c8;text-transform:uppercase;font-size:9px;letter-spacing:.08em}td strong{font-size:12px}.pill{display:inline-block;padding:3px 7px;border-radius:4px;font-size:9px}.buy{color:var(--green);border-color:#087d61}.sell{color:var(--red);border-color:#a52849}.hold{color:var(--amber);border-color:#75501a}.field label{display:block;font-size:10px;color:var(--muted);margin-bottom:5px}.field input,.field select{width:100%;min-width:0;background:#050a16;color:var(--text);border:1px solid #3c3155;border-radius:5px;padding:9px}button{background:#21102e;color:#fff;border:1px solid var(--pink);padding:8px 10px;border-radius:5px;font-weight:700;font-size:11px;cursor:pointer}button:hover{box-shadow:0 0 12px #ff26c955}button.safe{background:#06291f;border-color:#00a976;color:var(--green)}button.danger{background:#310e20;border-color:#ff456f;color:#ff829d}.controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.notice{border:1px solid #3d2751;background:#100b20;padding:10px;border-radius:5px;color:#b7c7e3;font-size:11px}.chart{width:100%;height:150px;display:block}.chart line{stroke:#20304b;stroke-width:1}.chart path{fill:none;stroke:var(--green);stroke-width:2.5;filter:drop-shadow(0 0 4px #00f0a0)}.side-stack{display:grid;gap:12px;align-content:start}.strategy{display:grid;grid-template-columns:minmax(0,1fr) minmax(88px,auto);gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #1d2940}.strategy>div{min-width:0}.strategy>span{max-width:190px;white-space:normal;overflow-wrap:anywhere;text-align:center;line-height:1.35}.side-stack .row{min-width:0}.side-stack .row>label{min-width:0;flex:1 1 100%}.side-stack .row>button{flex:0 1 auto}.switch{accent-color:#00f0a0;width:17px;height:17px}.footer{font-size:10px;color:var(--muted);padding:6px}.mini{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mini .value{font-size:18px}.message{min-height:18px;color:var(--cyan);font-size:11px;margin-top:8px}
 @media(max-width:1000px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.layout{grid-template-columns:1fr}}@media(max-width:520px){main{padding:8px}.controls{grid-template-columns:1fr 1fr}.stats{gap:7px}.card{padding:10px}.value{font-size:18px}header{padding:12px}}
 </style></head><body>
-<header><div class="brand"><div class="bot">◉</div><div><h1>MULTICHAIN PAPER AGENT</h1><div class="sub">RESEARCH  |  SIMULATE  |  ANALYZE  |  IMPROVE</div></div></div><div class="row"><span class="banner">● PAPER MODE  |  LIVE ORDERS DISABLED</span><span class="pill" id="feedstatus">DEMO FEED</span><span class="small" id="clock"></span></div></header>
+<header><div class="brand"><div class="bot">◉</div><div><h1>MULTICHAIN PAPER AGENT</h1><div class="sub">RESEARCH  |  SIMULATE  |  ANALYZE  |  IMPROVE</div></div></div><div class="row"><span class="banner">● PAPER MODE  |  LIVE ORDERS DISABLED</span><span class="pill" id="feedstatus">USD PAPER · CHECKING</span><span class="small" id="clock"></span></div></header>
 <main>
-<div class="row spread"><div class="row"><span class="pill">DASHBOARD</span><span class="pill">RISK-FIRST</span><span class="pill">CRYPTO  |  EXTENSIBLE</span></div><div class="row"><span class="small" id="engineStatus">Checking engine...</span><button class="danger" onclick="pauseEngine()">KILL SWITCH</button><button class="safe" onclick="resumeEngine()">RESUME PAPER</button></div></div>
+<div class="row spread"><div class="row"><span class="pill">DASHBOARD</span><span class="pill">RISK-FIRST</span><span class="pill">CRYPTO  |  EXTENSIBLE</span></div><div class="row"><span class="small" id="engineStatus">Checking engine...</span><button class="danger" onclick="pauseMultiMarket()">PAUSE PAPER</button><button class="safe" onclick="resumeMultiMarket()">RESUME PAPER</button></div></div>
 <section class="stats">
 <div class="card stat"><div class="label">Portfolio value</div><div class="value" id="equity">₹100,000</div><div class="sub">Virtual balance only</div></div>
 <div class="card" style="border-color:var(--green)"><div class="label">Paper P&L</div><div class="value positive" id="pnl">₹0</div><div class="sub" id="pnlPct">Simulated returns</div></div>
@@ -17,7 +32,8 @@
 <div class="card" style="border-color:var(--green)"><div class="label">Risk status</div><div class="value positive" id="riskStatus">SAFE</div><div class="sub">Backend-enforced limits</div></div>
 </section>
 <section class="card" id="multiMarketPanel">
-<div class="row spread"><div><h2>Multi-market paper terminal</h2><div class="small">Autonomous paper engine scans every supported market category on a bounded cycle. Prediction markets remain manual-only until candle history is validated. Separate $30 USD paper ledger; existing crypto history is preserved.</div></div><span class="pill">PAPER ONLY · NO LIVE ORDERS</span></div>
+<div class="row spread"><div><h2>Active paper-trading account · USD</h2><div class="small">Active account: USD. Fresh installations start with $30 virtual balance. The older INR crypto ledger remains separate; balances and trade history are never merged or converted.</div></div><span class="pill">PAPER ONLY · NO LIVE ORDERS</span></div>
+<div class="notice" id="databaseStatus" role="status">Checking database integrity before showing balances or enabling paper orders...</div>
 <div class="controls" style="margin-top:12px">
  <div class="field"><label>Market</label><select id="mmMarketType">
   <option value="crypto">Crypto · USDT spot</option><option value="stocks">Stocks</option><option value="forex">Forex · USD-quoted majors</option><option value="commodities">Commodities · futures references</option><option value="indices">Indices</option><option value="prediction">Prediction markets</option>
@@ -25,11 +41,11 @@
  <div class="field"><label>Paper automation</label><label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="mmAutoEnabled" class="switch" type="checkbox"> Auto-paper supported markets</label></div>
  <div class="field"><label>Controls</label><div class="row"><button onclick="saveMultiMarketSettings()">Save / apply</button><button class="danger" onclick="pauseMultiMarket()">Pause</button><button class="safe" onclick="resumeMultiMarket()">Resume</button></div></div>
 </div>
-<div id="mmStatus" class="notice" style="margin-top:10px">Loading public market instruments...</div>
+<div id="mmStatus" class="notice" style="margin-top:10px">Checking SQLite integrity and loading the USD paper ledger...</div>
 <div class="stats" style="margin-top:10px">
- <div class="card stat"><div class="label">Multi-market equity</div><div class="value" id="mmEquity">$30.00</div><div class="sub">Independent virtual USD account</div></div>
- <div class="card"><div class="label">Available cash</div><div class="value" id="mmCash">$30.00</div><div class="sub">Virtual funds only</div></div>
- <div class="card"><div class="label">Net paper P&amp;L</div><div class="value" id="mmPnL">$0.00</div><div class="sub" id="mmPnLPct">No simulated trades yet</div></div>
+ <div class="card stat"><div class="label">Multi-market equity</div><div class="value" id="mmEquity">—</div><div class="sub">Independent virtual USD account</div></div>
+ <div class="card"><div class="label">Available cash</div><div class="value" id="mmCash">—</div><div class="sub">Virtual funds only</div></div>
+ <div class="card"><div class="label">Net paper P&amp;L</div><div class="value" id="mmPnL">—</div><div class="sub" id="mmPnLPct">No simulated trades yet</div></div>
  <div class="card"><div class="label">Open positions</div><div class="value" id="mmPositionCount">0</div><div class="sub" id="mmRiskStatus">Risk limits active</div></div>
  <div class="card"><div class="label">Automation status</div><div class="value" id="mmAutoStatus">OFF</div><div class="sub" id="mmAutoCycles">Waiting for scheduler health...</div><div class="sub" id="mmManagedPositions">0 bot-managed positions</div></div>
 </div>
@@ -42,11 +58,11 @@
  <div class="side-stack">
   <div class="card"><h2>Multi-market order ticket</h2><div class="notice">Independent USD-denominated paper ledger. Quotes are fetched server-side before a simulated fill.</div>
    <div class="controls" style="margin-top:10px">
-    <div class="field"><label>Instrument</label><select id="mmSymbol"></select></div>
+    <div class="field"><label>Instrument</label><select id="mmSymbol" onchange="loadMultiMarketCandles()"></select></div>
     <div class="field"><label>Side</label><select id="mmSide"><option>BUY</option><option>SELL</option></select></div>
     <div class="field"><label>USD notional</label><input id="mmAmount" type="number" min="0.1" step="0.1" value="0.9"></div>
    </div>
-   <div class="row" style="margin-top:10px"><button class="safe" onclick="placeMultiMarketOrder()">Simulate order</button><button onclick="sellMultiMarketPercent(50)">Sell 50%</button><button onclick="sellMultiMarketPercent(100)">Sell all</button></div><div class="message" id="mmOrderMessage"></div>
+   <div class="row" style="margin-top:10px"><button id="mmOrderSubmit" class="safe" onclick="placeMultiMarketOrder()" disabled>Simulate order</button><button id="mmSell50" onclick="sellMultiMarketPercent(50)" disabled>Sell 50%</button><button id="mmSellAll" onclick="sellMultiMarketPercent(100)" disabled>Sell all</button></div><div class="message" id="mmOrderMessage"></div>
    <div class="small" style="margin-top:8px">Max trade: 3% · Daily loss stop: 3% · Max drawdown: 8% · Max exposure: 30% · One market-independent $30 virtual USD balance shared by these categories.</div>
   </div>
   <div class="card"><h2>Cross-market positions</h2><div class="tablewrap" style="max-height:220px;min-height:60px;overflow:auto"><table><thead><tr><th>Market</th><th>Instrument</th><th>Qty</th><th>Mark</th><th>Unrealized P&amp;L</th></tr></thead><tbody id="mmPositions"><tr><td colspan="5">No positions</td></tr></tbody></table></div><div class="small" id="mmValuationStatus">Valuation pending.</div></div>
@@ -55,39 +71,7 @@
 </div>
 <div class="small" style="margin-top:10px">The prediction-market adapter supports live public probabilities and manual paper orders. Automated prediction-market trading is intentionally disabled until reliable historical candle data is available. Equity/forex/futures contracts are fractional reference units; this is a research simulation, not a broker statement.</div>
 </section>
-<section class="card"><div class="row spread"><div><h2>Today’s USDT setups</h2><div class="small">Liquidity-filtered candidates ranked with completed-candle signals. BUY requires a rule-based signal; no profit guarantee.</div></div><button onclick="loadDailyCandidates()">Rescan candidates</button></div><div id="candidateStatus" class="small" style="margin:8px 0">Scanning liquid USDT markets...</div><div class="tablewrap" style="max-height:300px;min-height:100px"><table><thead><tr><th>Pair</th><th>Signal</th><th>Score</th><th>24h change</th><th>Market regime</th><th>Reference trade plan</th><th>Why</th><th>Action</th></tr></thead><tbody id="candidateRows"><tr><td colspan="8">Waiting for live scan...</td></tr></tbody></table></div></section>
-<section class="layout">
-<section class="card" id="moversCard"><h2>TOP MOVERS | USDT SPOT</h2>
-<div class="sub" id="moversStatus">Loading public market movers...</div>
-<div class="row" style="margin:8px 0"><button onclick="loadMovers('gainers')">Gainers</button><button onclick="loadMovers('losers')">Losers</button><button onclick="loadMovers('volatile')">High volatility</button></div>
-<div class="tablewrap" style="max-height:300px;overflow:auto"><table><thead><tr><th>PAIR</th><th>PRICE</th><th>24H %</th><th>QUOTE VOL</th><th>24H RANGE</th><th>ACTION</th></tr></thead><tbody id="moversRows"><tr><td colspan="6">Loading...</td></tr></tbody></table></div>
-<div class="small">Volatility is movement in either direction, not a buy recommendation.</div></section>
-<div class="card market-card"><div class="row spread"><h2>Live USDT market terminal</h2><span class="small" id="liveMarketMeta">Connecting to public market scanner...</span></div><div class="notice" style="margin:8px 0">LIVE MARKET DATA ≠ LIVE EXECUTION. Prices and 24-hour statistics come from Binance public spot ticker snapshots. All orders remain paper-simulated.</div><div class="tablewrap"><table><thead><tr><th>Asset / Pair</th><th>Price (USDT)</th><th>24h change</th><th>24h volume (USDT)</th><th>Trades</th><th>Trend score</th><th>Paper action</th></tr></thead><tbody id="market"><tr><td colspan="7">Loading live public market data...</td></tr></tbody></table></div><div class="small" style="margin-top:8px">Only Binance spot USDT pairs are shown. Click any pair for live ticker, completed candlesticks and an explainable BUY / HOLD / SELL research signal. Public REST data refreshes periodically; it is not a tick-by-tick WebSocket feed.</div>
-<div class="market-detail" id="marketDetail"><div class="row spread"><div><h2 id="detailTitle">Selected market  |  BTC/USDT</h2><div class="small" id="detailMeta">Loading live ticker and completed candles...</div></div><div class="market-toolbar"><button data-interval="1s" onclick="setIntervalMarket('1s',this)">1s</button><button data-interval="15s" onclick="setIntervalMarket('15s',this)">15s</button><button data-interval="30s" onclick="setIntervalMarket('30s',this)">30s</button><button data-interval="1m" onclick="setIntervalMarket('1m',this)">1m</button><button data-interval="3m" onclick="setIntervalMarket('3m',this)">3m</button><button class="active" data-interval="5m" onclick="setIntervalMarket('5m',this)">5m</button><button data-interval="15m" onclick="setIntervalMarket('15m',this)">15m</button><button data-interval="30m" onclick="setIntervalMarket('30m',this)">30m</button><button data-interval="1h" onclick="setIntervalMarket('1h',this)">1h</button><button data-interval="4h" onclick="setIntervalMarket('4h',this)">4h</button><button data-interval="1d" onclick="setIntervalMarket('1d',this)">1d</button></div></div>
-<div class="detail-stats"><div class="detail-stat"><div class="label">Last price</div><div class="value" id="detailPrice">—</div></div><div class="detail-stat"><div class="label">24h change</div><div class="value" id="detailChange">—</div></div><div class="detail-stat"><div class="label">24h volume (USDT)</div><div class="value" id="detailVolume">—</div></div><div class="detail-stat"><div class="label">24h range</div><div class="value" id="detailRange">—</div></div></div>
-<div class="candle-wrap" id="candleChart"><div class="small" style="padding:18px">Candlestick data will appear here.</div></div>
-<div class="row spread" style="margin-top:10px"><div><span class="pill" id="detailSignal">SIGNAL PENDING</span> <span class="small" id="detailScore"></span><div class="small signal-copy" id="detailReason">Waiting for completed-candle analysis.</div></div><button onclick="quick(selectedMarket,'BUY')">Paper buy selected</button></div><div class="small" id="detailWarning" style="margin-top:8px">Signals are research only, not a guarantee of profit. No live orders are sent.</div></div></div>
-<aside class="side-stack">
-<div class="card"><h2>Strategy engine</h2><div class="row spread"><span class="small">Explainable signals</span><span class="pill">PAPER ONLY</span></div>
-<div class="strategy"><div><strong>Combined signal</strong><div class="small">Trend + momentum + regime filter</div></div><span class="pill">READY</span></div>
-<div class="strategy"><div><strong>Walk-forward candidates</strong><div class="small">Trend  |  momentum  |  mean reversion  |  combined</div></div><span class="pill">READY</span></div>
-<div class="strategy"><div><strong>Strategy selection</strong><div class="small">Validation score selects; holdout test remains separate</div></div><span class="pill">RESEARCH</span></div>
-<div class="notice">Research candidates are compared in the backtest endpoint. Paper execution remains simulation-only and subject to backend risk controls.</div>
-</div>
-<div class="card"><h2>Automation & risk guard</h2><div class="strategy"><div>Automated paper cycle<div class="small">Background scheduler checks every five minutes when enabled and unpaused; backend risk checks remain mandatory.</div></div><span id="automationStatus" class="pill hold">AUDIT ONLY</span></div><div class="row" style="margin:10px 0"><label class="small"><input id="autoEnabled" type="checkbox" class="switch"> Automated paper trading ON/OFF</label><button onclick="saveAutomation()">Save automation</button><button class="safe" onclick="runAutoCycle()">Run cycle now</button></div><div class="strategy"><div>Completed-candle validation</div><span class="pill buy">ON</span></div><div class="strategy"><div>Stale-data protection</div><span class="pill buy">ON</span></div><div class="strategy"><div>Real-money execution</div><span class="pill sell">LOCKED  |  NO EXCHANGE ADAPTER</span></div><div class="notice">Automated trading can be switched ON/OFF for paper orders below. Public live prices are supported; real-money orders are unavailable in this build. Never enter exchange keys in the browser.</div>
-<div class="controls" style="margin-top:12px"><div class="field"><label>Starting virtual cash (₹)</label><input id="startcash" type="number" min="1" max="100000000" step="1"></div><div class="field"><label>Max trade %</label><input id="maxtrade" type="number" min="1" max="100"></div><div class="field"><label>Daily loss %</label><input id="loss" type="number" min="1" max="100"></div><div class="field"><label>Max positions</label><input id="maxpos" type="number" min="1" max="30"></div><div class="field"><label>Fees (bps)</label><input id="fee" type="number" min="0" max="500"></div><div class="field"><label>Slippage (bps)</label><input id="slippage" type="number" min="0" max="500"></div><div class="field"><label>Max drawdown %</label><input id="maxdrawdown" type="number" min="0.1" max="100" step="0.1"></div><div class="field"><label>Max exposure %</label><input id="maxexposure" type="number" min="0.1" max="100" step="0.1"></div><div class="field"><label>Market data</label><select id="marketmode"><option value="synthetic">Synthetic demo (offline)</option><option value="live_public">Public market prices</option></select></div><div class="field" style="display:flex;align-items:end"><button onclick="saveSettings()">Save limits</button></div></div>
-</div>
-<div class="card"><h2>Optional AI assistant</h2><div class="notice">AI is advisory only. Configure OPENAI_API_KEY in the local environment; keys are never stored in the database or browser. AI cannot execute orders. For automated paper cycles, select Public market prices first; synthetic prices are demo-only.</div><div class="row" style="margin-top:10px"><span class="small" id="aiStatus">Checking AI configuration...</span><button onclick="runAiAnalysis()">Analyze watchlist</button></div><div id="aiResult" class="notice" style="margin-top:10px;white-space:pre-wrap">No analysis requested.</div></div>
-</aside></section>
-<section class="layout">
-<div class="card"><div class="row spread"><h2>Portfolio equity curve</h2><span class="small">Illustrative current mark  |  history pending equity snapshots</span></div><svg class="chart" viewBox="0 0 800 150" preserveAspectRatio="none" aria-label="Portfolio equity trend"><line x1="0" y1="25" x2="800" y2="25"/><line x1="0" y1="75" x2="800" y2="75"/><line x1="0" y1="125" x2="800" y2="125"/><path id="equityPath" d="M0 80 L800 80"/></svg><div class="mini"><div><div class="label">Realized P&L</div><div class="value" id="realized">₹0</div></div><div><div class="label">Unrealized P&L</div><div class="value" id="unrealized">₹0</div></div><div><div class="label">Fees paid</div><div class="value" id="fees">₹0</div></div><div><div class="label">Slippage</div><div class="value" id="slippageCost">₹0</div></div></div></div>
-<div class="card"><h2>Paper order ticket</h2><div class="notice">Simulation ledger only. No wallet connection, signing, or live exchange orders.</div><div class="controls" style="margin-top:12px"><div class="field"><label>Asset</label><select id="symbol"></select></div><div class="field"><label>Side</label><select id="side"><option>BUY</option><option>SELL</option></select></div><div class="field"><label>Virtual amount</label><input id="amount" type="number" min="1" value="1000"></div></div><div class="row" style="margin-top:10px"><button class="safe" onclick="placeOrder()">Simulate order</button><button onclick="sellPercent(50)">Sell 50%</button><button onclick="sellPercent(100)">Sell all</button></div><div class="message" id="orderMessage"></div><hr style="border:0;border-top:1px solid #2a1a3a;margin:14px 0"><div class="row"><div class="field" style="flex:1"><label>Virtual-only top-up</label><input id="fundAmount" type="number" min="1" value="10000"></div><button onclick="fundWallet()">Add virtual funds</button></div><div class="small">Top-ups do not move real funds.</div></div></section>
-<section class="layout"><div class="card"><h2>Trade journal</h2><div class="tablewrap"><table><thead><tr><th>Time</th><th>Asset</th><th>Side</th><th>Strategy</th><th>Fill</th><th>Qty</th><th>Fees</th><th>P&L</th></tr></thead><tbody id="trades"></tbody></table></div></div><div class="card"><h2>Audit trail</h2><div class="tablewrap"><table><thead><tr><th>Time</th><th>Event</th><th>Detail</th></tr></thead><tbody id="audit"></tbody></table></div><div class="row" style="margin-top:10px"><button class="danger" onclick="resetSim()">Reset paper simulation</button><span class="small">Destructive: clears local trade history.</span></div><div class="mini" style="margin-top:14px"><div><div class="label">Profit factor</div><div class="value" id="pf">—</div></div><div><div class="label">Realized drawdown proxy</div><div class="value" id="dd">₹0</div></div></div><p class="small" id="metricnote"></p></div></section>
-<section class="layout">
-<div class="card"><div class="row spread"><h2>Trending spot universe</h2><button onclick="refreshIntelligence()">Rescan markets</button></div><p class="small">Public Binance USDT markets  |  ranked by liquidity, momentum and activity. Scores are heuristic, not profit probabilities.</p><div class="small" id="intelStatus">Loading market intelligence...</div><div class="tablewrap"><table><thead><tr><th>Asset</th><th>24h</th><th>Volume (USDT)</th><th>Trend score</th><th>Research</th></tr></thead><tbody id="trendingRows"><tr><td colspan="5">Waiting for public market data...</td></tr></tbody></table></div><pre class="small" id="backtestResult" style="white-space:pre-wrap;max-height:250px;overflow:auto"></pre></div>
-<div class="card"><div class="row spread"><h2>Crypto news pulse</h2><button onclick="refreshIntelligence()">Refresh news</button></div><p class="small">Public RSS headlines  |  basic explainable sentiment only. Negative relevant headlines can veto new paper BUY entries; positive news never forces a trade.</p><div id="newsList" class="feedlist">Loading public RSS feeds...</div></div>
-</section>
-<div class="footer">Neon live-market terminal  |  Automated paper trading toggle  |  Real-money execution locked  |  API keys stay server-side  |  Synthetic data is labeled  |  No profit guarantee  |  Windows compatible</div>
+<div class="footer">Auto Trader · USD-denominated virtual paper ledger · public market data · orders simulated only · original INR history retained separately</div>
 </main>
 <script>
 const $=id=>document.getElementById(id);const money=n=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(Number(n||0));const num=(n,d=4)=>Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:d});
@@ -327,8 +311,30 @@ function mmPrice(x){
  const p=Number(x.price||0);
  return p>=1000?num(p,2):p>=1?num(p,4):num(p,8);
 }
+function setPaperOrderControlsEnabled(enabled){
+ for(const id of ['mmOrderSubmit','mmSell50','mmSellAll'])$(id).disabled=!enabled;
+}
+function hideUnverifiedBalances(){
+ for(const id of ['mmEquity','mmCash','mmPnL'])$(id).textContent='—';
+ setPaperOrderControlsEnabled(false);
+}
 async function loadMultiMarket(){
  try{
+  setPaperOrderControlsEnabled(false);
+  const health=await api('/api/health');
+  if(!health.ok||!health.database||!health.database.ok||!health.paper_trading_enabled){
+   hideUnverifiedBalances();
+   const detail=(health.database&&Array.isArray(health.database.issues)?health.database.issues.join('; '):health.message||'database check failed');
+   $('databaseStatus').textContent='DATABASE CHECK FAILED — paper orders blocked. '+detail+' Preserve the database and backups; do not reset.';
+    $('feedstatus').textContent='ORDERS BLOCKED';
+   $('databaseStatus').className='notice negative';
+   $('mmStatus').textContent='Balances not displayed because database integrity is unconfirmed.';
+   $('mmOrderMessage').textContent='Paper order controls are disabled until the database is verified.';
+   return;
+  }
+  $('databaseStatus').textContent='DATABASE OK · SQLite integrity and saved ledger values validated. Active account: USD. Legacy INR history preserved separately.';
+   $('feedstatus').textContent='USD PAPER · DATABASE OK';
+  $('databaseStatus').className='notice';
   const saved=await api('/api/multi-market/settings');
   if(!mmInitialized){
    if(saved.selected_market)$('mmMarketType').value=saved.selected_market;
@@ -355,6 +361,8 @@ async function loadMultiMarket(){
   const prior=$('mmSymbol').value;
   $('mmSymbol').innerHTML=mmSelectedItems.map(x=>'<option value="'+esc(x.symbol)+'">'+esc(x.display_symbol||x.symbol)+'</option>').join('');
   if(mmSelectedItems.some(x=>x.symbol===prior))$('mmSymbol').value=prior;
+  if(!mmSelectedItems.some(x=>x.symbol=== $('mmSymbol').value) && mmSelectedItems.length)$('mmSymbol').value=mmSelectedItems[0].symbol;
+  await loadMultiMarketCandles();
   const s=await api('/api/multi-market/portfolio');
   $('mmEquity').textContent=mmUsd(s.equity_usd);$('mmCash').textContent=mmUsd(s.virtual_cash_usd);
   $('mmPnL').textContent=mmUsd(s.net_pnl_usd);$('mmPnL').className='value '+(s.net_pnl_usd>0?'positive':s.net_pnl_usd<0?'negative':'');
@@ -371,12 +379,35 @@ async function loadMultiMarket(){
   $('mmManagedPositions').textContent=(auto.managed_positions||0)+' bot-managed positions · '+(summary.markets_scanned||0)+' markets scanned · '+(summary.paper_fills||0)+' fills last sweep';
   if(type==='prediction'&&$('mmAutoEnabled').checked)$('mmAutoEnabled').checked=false;
   $('mmAutoEnabled').disabled=type==='prediction';
+  setPaperOrderControlsEnabled(!!s.valuation_complete);
  }catch(e){
-  $('mmStatus').textContent='Market data unavailable: '+e.message;
-  $('mmInstrumentRows').innerHTML='<tr><td colspan="6" class="negative">No fresh public data. Paper actions are unavailable until the feed recovers.</td></tr>';
+  hideUnverifiedBalances();
+  if($('databaseStatus')){$('databaseStatus').textContent='STATUS UNKNOWN — '+e.message+' No balance is shown and paper orders are disabled until checks succeed.';
+    $('feedstatus').textContent='ORDERS BLOCKED';$('databaseStatus').className='notice negative';}
+  $('mmStatus').textContent='Data / account unavailable: '+e.message;
+  $('mmInstrumentRows').innerHTML='<tr><td colspan="6" class="negative">No verified account state. Paper actions are unavailable until database and market checks recover.</td></tr>';
  }
 }
-function selectMultiMarketInstrument(symbol){$('mmSymbol').value=symbol;$('mmOrderMessage').textContent='Selected '+symbol+' for the '+$('mmMarketType').value+' paper ticket.';}
+function drawMultiMarketCandles(candles){
+ const svg=$('mmChart');const data=(candles||[]).filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0));
+ if(!data.length){svg.innerHTML='<text x="24" y="36" fill="#f59e0b">No fresh completed candles available. Chart will retry automatically.</text>';return;}
+ const W=1000,H=260,p=24,lo=Math.min(...data.map(c=>Number(c.low))),hi=Math.max(...data.map(c=>Number(c.high))),span=Math.max(hi-lo,1e-12),step=(W-2*p)/data.length,body=Math.max(2,step*.6),y=v=>H-p-(v-lo)/span*(H-2*p);
+ let out='';
+ for(let k=0;k<5;k++){const yy=p+k*(H-2*p)/4,v=hi-k*span/4;out+='<line x1="'+p+'" y1="'+yy+'" x2="'+(W-p)+'" y2="'+yy+'" stroke="#243247"/><text x="'+(W-p)+'" y="'+(yy-4)+'" text-anchor="end" font-size="11" fill="#94a3b8">'+num(v,8)+'</text>';}
+ data.forEach((c,i)=>{const x=p+i*step+step/2,o=y(+c.open),cl=y(+c.close),h=y(+c.high),l=y(+c.low),up=+c.close>=+c.open,col=up?'#34d399':'#fb7185';out+='<line x1="'+x+'" y1="'+h+'" x2="'+x+'" y2="'+l+'" stroke="'+col+'"/><rect x="'+(x-body/2)+'" y="'+Math.min(o,cl)+'" width="'+body+'" height="'+Math.max(1,Math.abs(cl-o))+'" fill="'+col+'"/>';});
+ svg.innerHTML=out;
+}
+async function loadMultiMarketCandles(){
+ const type=$('mmMarketType')?.value||'crypto',symbol=$('mmSymbol')?.value||mmSelectedItems[0]?.symbol;
+ if(!symbol)return;
+ $('mmChartTitle').textContent=(mmSelectedItems.find(x=>x.symbol===symbol)?.display_symbol||symbol)+' · price chart';
+ try{
+  const d=await api('/api/multi-market/candles?market_type='+encodeURIComponent(type)+'&symbol='+encodeURIComponent(symbol));
+  drawMultiMarketCandles(d.candles||[]);
+  $('mmChartMeta').textContent=(d.count||0)+' completed candles · latest '+(d.latest_at?new Date(d.latest_at).toLocaleString():'timestamp unavailable')+' · '+(d.interval||'provider interval');
+ }catch(e){$('mmChart').innerHTML='<text x="24" y="36" fill="#f59e0b">Candles unavailable: '+esc(e.message).slice(0,110)+'</text>';$('mmChartMeta').textContent='No fabricated candles; retrying automatically.';}
+}
+function selectMultiMarketInstrument(symbol){$('mmSymbol').value=symbol;$('mmOrderMessage').textContent='Selected '+symbol+' for the '+$('mmMarketType').value+' paper ticket.';loadMultiMarketCandles();}
 async function saveMultiMarketSettings(){
  try{
   const type=$('mmMarketType').value;
@@ -412,7 +443,5 @@ $('mmAutoEnabled').addEventListener('change',saveMultiMarketSettings);
 loadMultiMarket();setInterval(loadMultiMarket,30000);
 $('clock').textContent=new Date().toLocaleTimeString()+' LOCAL';
 setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString()+' LOCAL',1000);
-setInterval(refreshLiveStats,1000);refresh();refreshAiStatus();refreshIntelligence();loadDailyCandidates();
-setInterval(refresh,5000);setInterval(refreshAiStatus,30000);setInterval(refreshIntelligence,60000);setInterval(loadDailyCandidates,300000);
-loadMovers('gainers');setInterval(()=>loadMovers(moversMode),60000);
+// The single active desk owns its refresh loop. Do not poll hidden legacy INR/research panels.
 </script></body></html>
