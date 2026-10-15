@@ -286,8 +286,10 @@ class DatabaseIntegrityTests(unittest.TestCase):
 
     def test_empty_existing_sqlite_file_is_not_silently_initialized(self):
         empty = main.DB_PATH.parent / "empty-existing.db"
-        with sqlite3.connect(empty):
-            pass
+        # Use a separate connection and close it before validation, so Windows
+        # does not keep a file handle open through the context manager.
+        connection = sqlite3.connect(empty)
+        connection.close()
         original_path = main.DB_PATH
         try:
             main.DB_PATH = empty
