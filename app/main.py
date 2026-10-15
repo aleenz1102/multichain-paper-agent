@@ -1411,7 +1411,7 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
     candidates = candidates[:len(managed_symbols) + max_symbols]
     # Free, deterministic local ranking only reorders the shortlist. Existing candle
     # validation, signals, ATR plans, order checks and risk limits remain authoritative.
-    candidates, ranking_meta = rank_paper_opportunities(market_type, candidates)
+    candidates, ranking_meta = rank_paper_opportunities(market_type, candidates, protected_symbols=managed_symbols)
     if not candidates:
         raise HTTPException(503, "No fresh instruments were returned; no paper cycle was executed.")
     last_seen = dict(cfg.get("last_auto_candle_by_symbol", {}) or {})
