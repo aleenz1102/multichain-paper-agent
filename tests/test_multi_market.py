@@ -212,3 +212,48 @@ class PublicMarketAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class NativePaperOpportunityRankingTests(unittest.TestCase):
+    def test_ranks_fresh_positive_momentum_and_volume_without_external_sdk(self):
+        from app.opportunity_ranker import rank_candidates
+        sample = [
+            {"symbol": "LOW", "change_pct": -2.0, "volume": 100, "data_status": "STALE",
+             "history_status": "stale", "candle_count": 5},
+            {"symbol": "HIGH", "change_pct": 3.0, "volume": 10000, "data_status": "LIVE PUBLIC PRICE",
+             "history_status": "fresh", "candle_count": 120},
+        ]
+        ranked, meta = rank_candidates("crypto", sample)
+        self.assertEqual(ranked[0]["symbol"], "HIGH")
+        self.assertGreater(ranked[0]["opportunity_rank_score"], ranked[1]["opportunity_rank_score"])
+        self.assertIn("fresh public quote", ranked[0]["opportunity_rank_reasons"])
+        self.assertEqual(meta["provider"], "native-python")
+        self.assertFalse(meta["live_trading"])
+        self.assertEqual(meta["cost"], "no AI API fees")
+
+    def test_deterministic_tie_break_and_bounded_shortlist(self):
+        from app.opportunity_ranker import rank_candidates
+        sample = [{"symbol": str(i)} for i in range(22)]
+        ranked, meta = rank_candidates("crypto", sample)
+        self.assertEqual([x["symbol"] for x in ranked], [str(i) for i in range(12)])
+        self.assertEqual(ranked[0]["symbol"], "0")
+        self.assertEqual(meta["ranked_count"], 12)
+
+    def test_protected_open_position_is_not_dropped_from_shortlist(self):
+        from app.opportunity_ranker import rank_candidates
+        sample = [{"symbol": str(i), "change_pct": 0} for i in range(15)]
+        ranked, meta = rank_candidates("crypto", sample, protected_symbols=["14"])
+        self.assertIn("14", [item["symbol"] for item in ranked])
+        self.assertEqual(len(ranked), 12)
+        self.assertFalse(meta["live_trading"])
+
+    def test_missing_fields_and_non_finite_values_are_safe(self):
+        from app.opportunity_ranker import rank_candidates
+        ranked, meta = rank_candidates("stocks", [
+            {"symbol": "NAN", "change_pct": float("nan"), "volume": float("inf"), "candle_count": None}
+        ])
+        self.assertEqual(len(ranked), 1)
+        self.assertTrue(0 <= ranked[0]["opportunity_rank_score"] <= 100)
+        self.assertEqual(meta["mode"], "PAPER_ONLY")
+        self.assertFalse(meta["live_trading"])

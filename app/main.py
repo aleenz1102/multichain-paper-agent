@@ -24,6 +24,7 @@ from app.auto_monitor import MonitorConfig, PaperSignalMonitor
 from app.candle_data import BinancePublicCandleProvider
 from app.auto_scheduler import PaperAutoScheduler
 from app.market_adapters import PublicMultiMarketProvider, MARKET_TYPES, MarketDataError
+from app.opportunity_ranker import rank_candidates as rank_paper_opportunities
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT.parent / "paper_agent.db"
@@ -1408,6 +1409,9 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
         if str(item.get("symbol", "")) not in set(managed_symbols)
     )
     candidates = candidates[:len(managed_symbols) + max_symbols]
+    # Free, deterministic local ranking only reorders the shortlist. Existing candle
+    # validation, signals, ATR plans, order checks and risk limits remain authoritative.
+    candidates, ranking_meta = rank_paper_opportunities(market_type, candidates, protected_symbols=managed_symbols)
     if not candidates:
         raise HTTPException(503, "No fresh instruments were returned; no paper cycle was executed.")
     last_seen = dict(cfg.get("last_auto_candle_by_symbol", {}) or {})
@@ -1561,6 +1565,9 @@ def multi_market_auto_cycle(market_type: str | None = None, max_symbols: int = 6
     return {"status": "completed", "mode": "PAPER_ONLY", "market_type": market_type,
             "live_trading": False, "orders_submitted": False,
             "evaluated": len(candidates), "paper_fills": sum(x.get("status") == "paper_filled" for x in actions),
+            "opportunity_ranking": ranking_meta,
+            "candidate_order": [{"symbol": x.get("symbol"), "score": x.get("opportunity_rank_score"),
+                                 "reasons": x.get("opportunity_rank_reasons", [])} for x in candidates],
             "actions": actions}
 
 
@@ -1597,6 +1604,13 @@ def multi_market_auto_cycle_all(max_symbols: int = 2):
         "live_trading": False, "status": summary["status"],
     })
     return summary
+
+
+@app.get("/api/multi-market/ranking/status")
+def multi_market_ranking_status():
+    return {"provider": "native-python", "enabled": True, "status": "ready",
+            "cost": "no AI API fees", "mode": "PAPER_ONLY", "live_trading": False,
+            "role": "advisory candidate ordering only; deterministic strategy and risk gates remain authoritative"}
 
 
 @app.get("/api/multi-market/catalog")
