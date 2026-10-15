@@ -159,6 +159,6 @@ This is still **paper-only research software, not a certified production trading
 
 Minimum starting balance for paper trading is **₹0 real money**; the virtual balance is configurable and only exists in SQLite. No Binance API key, signed request, wallet, or real order is present. Do not enable real trading by merely adding credentials; a separate reviewed execution adapter and a new safety review would be required.
 
-## Optional TypeSafe AI ranking
+## Free native Python opportunity ranking
 
-See [`docs/typesafe-ranking.md`](docs/typesafe-ranking.md) for optional, advisory-only candidate ranking configuration and safety boundaries.
+Automated paper scans use a deterministic local ranking based on reported 24-hour momentum, relative volume, quote freshness, and reported candle-history depth. It requires no AI API key, adds no AI API fees, and only reorders a shortlist. Existing completed-candle strategy rules, ATR plans, and risk controls remain authoritative. Ranking scores are research priorities, not profit probabilities.
