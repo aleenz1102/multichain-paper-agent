@@ -181,7 +181,7 @@ def ensure_database_healthy():
 
 def init_db():
     # Preflight an existing database read-only before schema initialization.
-    if DB_PATH.exists() and DB_PATH.stat().st_size > 0:
+    if DB_PATH.exists():
         report = database_integrity_report(require_schema=False)
         if not report["ok"]:
             raise PaperDatabaseIntegrityError(
